@@ -1,0 +1,159 @@
+{
+  "templates": [
+    {
+      "id": "goblin",
+      "name": "Goblin",
+      "tier": 1,
+      "base_hp": 50,
+      "base_damage": 8,
+      "attack_speed": 1.2,
+      "defense": 2,
+      "crit_chance": 0.05,
+      "sprite": "goblin",
+      "drop_chance": 0.4,
+      "gold_reward": 10,
+      "scaling": {
+        "hp_per_round": 8,
+        "damage_per_round": 1.5
+      }
+    },
+    {
+      "id": "skeleton",
+      "name": "Skeleton Warrior",
+      "tier": 1,
+      "base_hp": 60,
+      "base_damage": 10,
+      "attack_speed": 0.9,
+      "defense": 5,
+      "crit_chance": 0.08,
+      "sprite": "skeleton",
+      "drop_chance": 0.45,
+      "gold_reward": 12,
+      "scaling": {
+        "hp_per_round": 10,
+        "damage_per_round": 2
+      }
+    },
+    {
+      "id": "wolf",
+      "name": "Dire Wolf",
+      "tier": 1,
+      "base_hp": 40,
+      "base_damage": 12,
+      "attack_speed": 1.5,
+      "defense": 0,
+      "crit_chance": 0.15,
+      "sprite": "wolf",
+      "drop_chance": 0.35,
+      "gold_reward": 8,
+      "scaling": {
+        "hp_per_round": 6,
+        "damage_per_round": 2
+      }
+    },
+    {
+      "id": "spider",
+      "name": "Giant Spider",
+      "tier": 2,
+      "base_hp": 70,
+      "base_damage": 15,
+      "attack_speed": 1.3,
+      "defense": 3,
+      "crit_chance": 0.1,
+      "sprite": "spider",
+      "drop_chance": 0.5,
+      "gold_reward": 18,
+      "scaling": {
+        "hp_per_round": 12,
+        "damage_per_round": 2.5
+      }
+    },
+    {
+      "id": "orc",
+      "name": "Orc Brute",
+      "tier": 2,
+      "base_hp": 100,
+      "base_damage": 18,
+      "attack_speed": 0.7,
+      "defense": 10,
+      "crit_chance": 0.12,
+      "sprite": "orc",
+      "drop_chance": 0.55,
+      "gold_reward": 25,
+      "scaling": {
+        "hp_per_round": 15,
+        "damage_per_round": 3
+      }
+    },
+    {
+      "id": "troll",
+      "name": "Cave Troll",
+      "tier": 3,
+      "base_hp": 150,
+      "base_damage": 25,
+      "attack_speed": 0.5,
+      "defense": 15,
+      "crit_chance": 0.08,
+      "sprite": "troll",
+      "drop_chance": 0.6,
+      "gold_reward": 40,
+      "scaling": {
+        "hp_per_round": 20,
+        "damage_per_round": 4
+      }
+    },
+    {
+      "id": "demon",
+      "name": "Lesser Demon",
+      "tier": 3,
+      "base_hp": 120,
+      "base_damage": 30,
+      "attack_speed": 1.0,
+      "defense": 8,
+      "crit_chance": 0.2,
+      "sprite": "demon",
+      "drop_chance": 0.65,
+      "gold_reward": 50,
+      "scaling": {
+        "hp_per_round": 18,
+        "damage_per_round": 5
+      }
+    },
+    {
+      "id": "vampire",
+      "name": "Vampire Lord",
+      "tier": 4,
+      "base_hp": 180,
+      "base_damage": 35,
+      "attack_speed": 1.1,
+      "defense": 12,
+      "crit_chance": 0.18,
+      "life_steal": 0.2,
+      "sprite": "vampire",
+      "drop_chance": 0.7,
+      "gold_reward": 75,
+      "scaling": {
+        "hp_per_round": 25,
+        "damage_per_round": 6
+      }
+    },
+    {
+      "id": "lich",
+      "name": "Lich King",
+      "tier": 5,
+      "base_hp": 250,
+      "base_damage": 45,
+      "attack_speed": 0.8,
+      "defense": 20,
+      "crit_chance": 0.25,
+      "true_damage": 10,
+      "sprite": "lich",
+      "drop_chance": 0.8,
+      "gold_reward": 100,
+      "scaling": {
+        "hp_per_round": 35,
+        "damage_per_round": 8
+      }
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "templates": [
+    {
+      "id": "leather",
+      "name": "Leather Armor",
+      "base_defense": 5,
+      "base_hp": 20,
+      "base_dodge": 0.05,
+      "variants": ["Worn", "Sturdy", "Hardened", "Shadow", "Dragon"]
+    },
+    {
+      "id": "chainmail",
+      "name": "Chainmail",
+      "base_defense": 10,
+      "base_hp": 30,
+      "base_resistance": 0.05,
+      "variants": ["Rusty", "Polished", "Reinforced", "Mithril", "Adamantine"]
+    },
+    {
+      "id": "plate",
+      "name": "Plate Armor",
+      "base_defense": 18,
+      "base_hp": 50,
+      "base_resistance": 0.1,
+      "variants": ["Iron", "Steel", "Blessed", "Titan", "Divine"]
+    },
+    {
+      "id": "robe",
+      "name": "Enchanted Robe",
+      "base_defense": 3,
+      "base_hp": 40,
+      "base_resistance": 0.15,
+      "variants": ["Apprentice", "Mage", "Archmage", "Void", "Cosmic"]
+    }
+  ]
+}

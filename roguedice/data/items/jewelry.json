@@ -1,0 +1,40 @@
+{
+  "templates": [
+    {
+      "id": "ring_power",
+      "name": "Ring of Power",
+      "base_damage_bonus": 3,
+      "base_crit_chance": 0.03,
+      "variants": ["Copper", "Silver", "Gold", "Platinum", "Eternal"]
+    },
+    {
+      "id": "ring_vitality",
+      "name": "Ring of Vitality",
+      "base_hp_bonus": 15,
+      "base_life_steal": 0.02,
+      "variants": ["Minor", "Lesser", "Greater", "Superior", "Divine"]
+    },
+    {
+      "id": "amulet_protection",
+      "name": "Amulet of Protection",
+      "base_defense_bonus": 4,
+      "base_resistance": 0.03,
+      "variants": ["Wooden", "Bronze", "Silver", "Golden", "Sacred"]
+    },
+    {
+      "id": "amulet_speed",
+      "name": "Amulet of Speed",
+      "base_attack_speed_bonus": 0.1,
+      "base_dodge": 0.02,
+      "variants": ["Swift", "Quick", "Rapid", "Lightning", "Time"]
+    },
+    {
+      "id": "pendant_fortune",
+      "name": "Pendant of Fortune",
+      "base_crit_chance": 0.05,
+      "base_crit_multiplier": 0.2,
+      "special_effect": "increased_drop_rate",
+      "variants": ["Lucky", "Blessed", "Enchanted", "Mythic", "Fated"]
+    }
+  ]
+}

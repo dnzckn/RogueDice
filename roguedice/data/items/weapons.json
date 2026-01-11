@@ -1,0 +1,46 @@
+{
+  "templates": [
+    {
+      "id": "sword",
+      "name": "Sword",
+      "base_damage": 10,
+      "base_attack_speed": 1.0,
+      "base_crit_chance": 0.05,
+      "variants": ["Iron", "Steel", "Mithril", "Dragon", "Void"]
+    },
+    {
+      "id": "dagger",
+      "name": "Dagger",
+      "base_damage": 6,
+      "base_attack_speed": 1.8,
+      "base_crit_chance": 0.15,
+      "variants": ["Sharp", "Assassin's", "Shadow", "Venom", "Soul"]
+    },
+    {
+      "id": "axe",
+      "name": "Axe",
+      "base_damage": 15,
+      "base_attack_speed": 0.7,
+      "base_crit_chance": 0.1,
+      "base_crit_multiplier": 2.5,
+      "variants": ["Battle", "War", "Executioner's", "Berserker's", "Chaos"]
+    },
+    {
+      "id": "mace",
+      "name": "Mace",
+      "base_damage": 12,
+      "base_attack_speed": 0.85,
+      "base_crit_chance": 0.08,
+      "base_true_damage": 2,
+      "variants": ["Heavy", "Spiked", "Blessed", "Crushing", "Divine"]
+    },
+    {
+      "id": "spear",
+      "name": "Spear",
+      "base_damage": 11,
+      "base_attack_speed": 1.1,
+      "base_crit_chance": 0.12,
+      "variants": ["Long", "Barbed", "Thunder", "Dragon", "Celestial"]
+    }
+  ]
+}
