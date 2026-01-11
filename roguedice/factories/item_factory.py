@@ -99,7 +99,7 @@ class ItemFactory:
         variant = variants[variant_index]
 
         base_name = template.get("name", "Item")
-        name = f"{variant} {base_name} +{level}"
+        name = f"{variant} {base_name}"  # Level displayed via T{level}: prefix in UI
 
         item = ItemComponent(
             name=name,
