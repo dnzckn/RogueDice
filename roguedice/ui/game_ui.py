@@ -100,6 +100,21 @@ class GameUI:
         self.screen_shake = 0.0
         self.transition_alpha = 0
 
+        # Dragon speech bubble
+        self.dragon_last_chains = 8
+        self.dragon_speech: Optional[str] = None
+        self.dragon_speech_timer: float = 0.0
+        self.DRAGON_QUOTES = [
+            "Grr... that tickles!",
+            "You'll regret this, mortal!",
+            "My power grows stronger!",
+            "Soon I shall be FREE!",
+            "Your doom approaches!",
+            "The chains weaken...",
+            "Foolish adventurer!",
+            "I will burn everything!",
+        ]
+
         # Battle scene
         self.battle_scene = BattleScene(self.WINDOW_WIDTH, self.WINDOW_HEIGHT)
         self.pending_turn_result: Optional[TurnResult] = None
@@ -270,7 +285,18 @@ class GameUI:
             return
 
         if event.key == pygame.K_ESCAPE:
+            # Close merchant and make them travel to a new square
+            new_idx = self.game.close_merchant_and_travel()
+            self.message_log.append(f"Merchant travels to square {new_idx}!")
             self.state = "playing"
+        elif event.key == pygame.K_r:
+            # Reroll merchant inventory
+            cost = merchant.reroll_cost
+            if self.game.reroll_merchant_inventory():
+                self.message_log.append(f"Rerolled! (-{cost}g)")
+                self._add_particles(self.WINDOW_WIDTH // 2, 300, PALETTE['gold'], 15)
+            else:
+                self.message_log.append(f"Need {cost}g to reroll!")
         elif event.key == pygame.K_p:
             if self.game.purchase_merchant_potion():
                 self.message_log.append("Bought potion!")
@@ -594,6 +620,12 @@ class GameUI:
                 self._add_particles(x + self.SQUARE_SIZE // 2, y + self.SQUARE_SIZE // 2 + 10,
                                   (150, 140, 120), 3)
 
+        # Update dragon speech bubble timer
+        if self.dragon_speech_timer > 0:
+            self.dragon_speech_timer -= dt
+            if self.dragon_speech_timer <= 0:
+                self.dragon_speech = None
+
         # Update particles
         for p in self.particle_effects[:]:
             p['x'] += p['vx'] * dt
@@ -751,6 +783,15 @@ class GameUI:
         chains_broken = min(total_chains, (current_round * total_chains) // boss_round)
         chains_remaining = total_chains - chains_broken
 
+        # Detect chain break and trigger speech bubble
+        if chains_remaining < self.dragon_last_chains:
+            # A chain just broke!
+            chain_index = total_chains - chains_remaining - 1
+            self.dragon_speech = self.DRAGON_QUOTES[chain_index % len(self.DRAGON_QUOTES)]
+            self.dragon_speech_timer = 3.0  # Show for 3 seconds
+            self.screen_shake = 0.3
+        self.dragon_last_chains = chains_remaining
+
         # Dragon sprite size
         dragon_size = 130
 
@@ -832,6 +873,49 @@ class GameUI:
             free_color = (int(255 * (0.8 + 0.2 * pulse)), int(50 + 50 * pulse), 50)
             free_text = self.font_medium.render("THE DRAGON AWAKENS!", True, free_color)
             surface.blit(free_text, (center_x - free_text.get_width() // 2, center_y + 55))
+
+        # Draw dragon speech bubble if active
+        if self.dragon_speech and self.dragon_speech_timer > 0:
+            self._draw_dragon_speech_bubble(surface, center_x, dragon_y - 20)
+
+    def _draw_dragon_speech_bubble(self, surface: pygame.Surface, x: int, y: int) -> None:
+        """Draw a speech bubble above the dragon."""
+        text = self.font_small.render(self.dragon_speech, True, (40, 20, 20))
+        text_w, text_h = text.get_width(), text.get_height()
+
+        # Bubble dimensions
+        padding = 8
+        bubble_w = text_w + padding * 2
+        bubble_h = text_h + padding * 2
+        bubble_x = x - bubble_w // 2
+        bubble_y = y - bubble_h
+
+        # Bobbing animation
+        bob = math.sin(pygame.time.get_ticks() / 150) * 3
+
+        # Draw bubble background (white with border)
+        bubble_surf = pygame.Surface((bubble_w + 4, bubble_h + 15), pygame.SRCALPHA)
+
+        # Main bubble
+        pygame.draw.ellipse(bubble_surf, (255, 255, 240), (2, 2, bubble_w, bubble_h))
+        pygame.draw.ellipse(bubble_surf, (80, 60, 40), (2, 2, bubble_w, bubble_h), 2)
+
+        # Speech bubble tail (pointing down)
+        tail_points = [
+            (bubble_w // 2, bubble_h),
+            (bubble_w // 2 - 8, bubble_h - 2),
+            (bubble_w // 2 + 5, bubble_h + 12),
+        ]
+        pygame.draw.polygon(bubble_surf, (255, 255, 240), tail_points)
+        pygame.draw.lines(bubble_surf, (80, 60, 40), False, tail_points, 2)
+
+        # Draw text
+        bubble_surf.blit(text, (padding + 2, padding + 2))
+
+        # Blit to surface with fade based on timer
+        alpha = min(255, int(self.dragon_speech_timer * 100))
+        bubble_surf.set_alpha(alpha)
+        surface.blit(bubble_surf, (bubble_x, int(bubble_y + bob)))
 
     def _get_square_position(self, index: int, bx: int, by: int) -> Tuple[int, int]:
         """Get pixel position for a square index."""
@@ -1536,17 +1620,22 @@ class GameUI:
 
         # Potion section
         pot_label = self.font_medium.render("POTION:", True, PALETTE['green'])
-        self.screen.blit(pot_label, (x + 30, y + 350))
+        self.screen.blit(pot_label, (x + 30, y + 340))
 
         if merchant.has_potion:
             pot_text = self.font_small.render(f"[P] Health Potion - {merchant.potion_price}g", True, PALETTE['green'])
         else:
             pot_text = self.font_small.render("Sold out", True, PALETTE['gray'])
-        self.screen.blit(pot_text, (x + 40, y + 375))
+        self.screen.blit(pot_text, (x + 40, y + 365))
 
-        # Exit
-        exit_text = self.font_medium.render("[ESC] Leave Shop", True, PALETTE['gray'])
-        self.screen.blit(exit_text, (x + w // 2 - 65, y + h - 40))
+        # Reroll section
+        reroll_color = PALETTE['gold'] if player and player.gold >= merchant.reroll_cost else PALETTE['gray']
+        reroll_text = self.font_small.render(f"[R] Reroll Inventory - {merchant.reroll_cost}g", True, reroll_color)
+        self.screen.blit(reroll_text, (x + 40, y + 395))
+
+        # Exit - merchant travels when you leave
+        exit_text = self.font_medium.render("[ESC] Leave (Merchant will travel)", True, PALETTE['gray'])
+        self.screen.blit(exit_text, (x + w // 2 - 120, y + h - 40))
 
     def _draw_game_over(self) -> None:
         """Draw game over / upgrade screen."""

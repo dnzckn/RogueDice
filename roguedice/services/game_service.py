@@ -36,6 +36,7 @@ class MerchantInventory:
     blessings: List[Blessing] = field(default_factory=list)
     potion_price: int = 50
     has_potion: bool = True
+    reroll_cost: int = 25  # Cost to reroll inventory
 
 
 @dataclass
@@ -86,6 +87,7 @@ class GameService:
 
         # Merchant
         self.merchant_inventory: Optional[MerchantInventory] = None
+        self.merchant_square_index: int = 10  # Merchant starts at CORNER_SHOP
 
         # Boss tracking
         self.boss_entity_id: Optional[int] = None
@@ -297,30 +299,37 @@ class GameService:
     ) -> None:
         """Process landing on a square."""
 
-        if square.triggers_combat and square.monster_entity_id:
-            # Check if this is the boss
-            is_boss = square.monster_entity_id == self.boss_entity_id
+        if square.triggers_combat and square.monster_entity_ids:
+            # Check if this is the boss fight
+            is_boss = self.boss_entity_id in square.monster_entity_ids
             result.is_boss_fight = is_boss
 
             # Apply blessing bonuses to stats temporarily
             self._apply_blessing_combat_bonuses(player, player_stats)
 
-            # Combat!
-            combat_result = self.combat_system.run_full_combat(
-                self.player_id,
-                square.monster_entity_id,
-            )
+            # Combat! Use multi-combat if multiple monsters
+            monster_ids = square.monster_entity_ids.copy()
+            if len(monster_ids) > 1:
+                combat_result = self.combat_system.run_multi_combat(
+                    self.player_id,
+                    monster_ids,
+                )
+            else:
+                combat_result = self.combat_system.run_full_combat(
+                    self.player_id,
+                    monster_ids[0],
+                )
             result.combat_result = combat_result
 
             if combat_result.victory:
                 # Earn gold
                 result.gold_earned = combat_result.gold_earned
                 player.add_gold(combat_result.gold_earned)
-                player.monsters_killed += 1
+                player.monsters_killed += combat_result.monsters_defeated
 
-                # Check for item drop
+                # Check for item drop (from first monster)
                 dropped_item = self.loot_system.roll_monster_drop(
-                    square.monster_entity_id,
+                    monster_ids[0],
                     player.current_round,
                 )
                 if dropped_item:
@@ -330,9 +339,10 @@ class GameService:
                     )
                     combat_result.item_dropped = True
 
-                # Clear monster from square
-                self.world.destroy_entity(square.monster_entity_id)
-                square.clear_monster()
+                # Clear all monsters from square
+                for mid in monster_ids:
+                    self.world.destroy_entity(mid)
+                square.clear_all_monsters()
 
                 # Check if boss was defeated
                 if is_boss:
@@ -386,8 +396,8 @@ class GameService:
                 player_stats.full_heal()
             result.healed = True
 
-        elif square.square_type == SquareType.CORNER_SHOP:
-            # Open merchant
+        elif square.square_type == SquareType.CORNER_SHOP or square.index == self.merchant_square_index:
+            # Open traveling merchant
             self._generate_merchant_inventory(player.current_round)
             result.opened_merchant = True
 
@@ -623,6 +633,48 @@ class GameService:
             self.merchant_inventory.has_potion = False
             return True
         return False
+
+    def reroll_merchant_inventory(self) -> bool:
+        """Reroll merchant inventory for gold. Returns True if successful."""
+        if not self.merchant_inventory:
+            return False
+
+        player = self.world.get_component(self.player_id, PlayerComponent)
+        if not player:
+            return False
+
+        cost = self.merchant_inventory.reroll_cost
+        if player.spend_gold(cost):
+            # Regenerate inventory
+            self._generate_merchant_inventory(player.current_round)
+            # 5x reroll cost per reroll (exponential scaling)
+            self.merchant_inventory.reroll_cost = cost * 5
+            return True
+        return False
+
+    def close_merchant_and_travel(self) -> int:
+        """Close merchant shop and move merchant to random square. Returns new index."""
+        import random
+
+        # Valid squares for merchant: non-corner, non-boss, not where player is
+        player_pos = self.get_player_position()
+        valid_indices = []
+        for i in range(40):
+            if i in (0, 10, 20, 30):  # Skip corners
+                continue
+            if i == player_pos:  # Skip player position
+                continue
+            valid_indices.append(i)
+
+        if valid_indices:
+            self.merchant_square_index = random.choice(valid_indices)
+
+        self.merchant_inventory = None
+        return self.merchant_square_index
+
+    def get_merchant_square_index(self) -> int:
+        """Get the current square index where the merchant is located."""
+        return self.merchant_square_index
 
     def continue_after_victory(self) -> None:
         """Continue playing after boss victory (for fun, no new rewards)."""
