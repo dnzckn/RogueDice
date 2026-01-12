@@ -7,13 +7,11 @@ from ..core.component import Component
 
 @dataclass
 class EquipmentComponent(Component):
-    """Currently equipped items."""
+    """Currently equipped items - one slot per type."""
 
-    weapon: Optional[int] = None        # Entity ID
-    armor: Optional[int] = None         # Entity ID
-    jewelry_slots: List[Optional[int]] = field(
-        default_factory=lambda: [None, None, None]  # 3 jewelry slots
-    )
+    weapon: Optional[int] = None   # Entity ID
+    armor: Optional[int] = None    # Entity ID
+    ring: Optional[int] = None     # Entity ID (single ring slot)
 
     def equip_weapon(self, item_id: int) -> Optional[int]:
         """Equip weapon, return previously equipped weapon ID if any."""
@@ -27,13 +25,11 @@ class EquipmentComponent(Component):
         self.armor = item_id
         return old
 
-    def equip_jewelry(self, item_id: int, slot: int = 0) -> Optional[int]:
-        """Equip jewelry to slot, return previously equipped jewelry ID if any."""
-        if 0 <= slot < len(self.jewelry_slots):
-            old = self.jewelry_slots[slot]
-            self.jewelry_slots[slot] = item_id
-            return old
-        return None
+    def equip_ring(self, item_id: int) -> Optional[int]:
+        """Equip ring, return previously equipped ring ID if any."""
+        old = self.ring
+        self.ring = item_id
+        return old
 
     def unequip_weapon(self) -> Optional[int]:
         """Unequip and return weapon ID."""
@@ -47,13 +43,11 @@ class EquipmentComponent(Component):
         self.armor = None
         return old
 
-    def unequip_jewelry(self, slot: int) -> Optional[int]:
-        """Unequip and return jewelry ID from slot."""
-        if 0 <= slot < len(self.jewelry_slots):
-            old = self.jewelry_slots[slot]
-            self.jewelry_slots[slot] = None
-            return old
-        return None
+    def unequip_ring(self) -> Optional[int]:
+        """Unequip and return ring ID."""
+        old = self.ring
+        self.ring = None
+        return old
 
     def get_all_equipped(self) -> List[int]:
         """Get list of all equipped item IDs."""
@@ -62,7 +56,6 @@ class EquipmentComponent(Component):
             equipped.append(self.weapon)
         if self.armor is not None:
             equipped.append(self.armor)
-        for jewelry in self.jewelry_slots:
-            if jewelry is not None:
-                equipped.append(jewelry)
+        if self.ring is not None:
+            equipped.append(self.ring)
         return equipped

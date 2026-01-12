@@ -23,6 +23,11 @@ class MoveResult:
     new_round: int
     square_entity: Optional[int]
     square_component: Optional[BoardSquareComponent]
+    # Extra info from special dice mechanics
+    rolled_doubles: bool = False
+    exploded: bool = False
+    cursed: bool = False
+    random_die: Optional[int] = None
 
     @property
     def dice(self) -> Tuple[int, ...]:
@@ -55,10 +60,23 @@ class MovementSystem(System):
         if not position or not player:
             raise ValueError("Player missing required components")
 
-        # Roll using character's dice formula
-        rolls, modifier, total = roll_for_character(player.character_id)
-        roll_text = format_roll(rolls, modifier, total)
+        # Roll using character's dice formula with special mechanics
+        rolls, modifier, total, extra_info = roll_for_character(
+            player.character_id,
+            momentum=player.momentum,
+            death_stacks=player.death_stacks,
+        )
+        roll_text = format_roll(rolls, modifier, total, extra_info)
         old_position = position.square_index
+
+        # Update player roll info for UI
+        player.last_roll_doubled = extra_info.get("rolled_doubles", False)
+        player.last_roll_exploded = extra_info.get("exploded", False)
+        player.last_roll_cursed = extra_info.get("cursed", False)
+
+        # Handle doubles rolled (for Paladin shield)
+        if extra_info.get("rolled_doubles"):
+            player.on_doubles_rolled(total)
 
         # Move
         laps = position.advance(total, BOARD_SIZE)
@@ -85,6 +103,10 @@ class MovementSystem(System):
             new_round=player.current_round,
             square_entity=square_entity,
             square_component=square_component,
+            rolled_doubles=extra_info.get("rolled_doubles", False),
+            exploded=extra_info.get("exploded", False),
+            cursed=extra_info.get("cursed", False),
+            random_die=extra_info.get("random_die"),
         )
 
     def get_player_position(self, player_id: int) -> int:

@@ -7,7 +7,9 @@ from ..components.stats import StatsComponent
 from ..components.equipment import EquipmentComponent
 from ..components.inventory import InventoryComponent
 from ..components.item import ItemComponent
+from ..components.player import PlayerComponent
 from ..models.enums import ItemType
+from ..models.characters import get_character
 
 
 class EquipmentSystem(System):
@@ -44,13 +46,7 @@ class EquipmentSystem(System):
         elif item.item_type == ItemType.ARMOR:
             old_item = equipment.equip_armor(item_id)
         elif item.item_type == ItemType.JEWELRY:
-            # Find first empty slot, or replace first slot
-            for i in range(len(equipment.jewelry_slots)):
-                if equipment.jewelry_slots[i] is None:
-                    equipment.equip_jewelry(item_id, i)
-                    break
-            else:
-                old_item = equipment.equip_jewelry(item_id, 0)
+            old_item = equipment.equip_ring(item_id)
 
         # Put old item in inventory
         if old_item is not None:
@@ -61,14 +57,13 @@ class EquipmentSystem(System):
 
         return old_item
 
-    def unequip_item(self, entity_id: int, slot: str, slot_index: int = 0) -> Optional[int]:
+    def unequip_item(self, entity_id: int, slot: str) -> Optional[int]:
         """
         Unequip an item to inventory.
 
         Args:
             entity_id: Entity that's unequipping
-            slot: "weapon", "armor", or "jewelry"
-            slot_index: For jewelry, which slot (0-2)
+            slot: "weapon", "armor", or "ring"
 
         Returns:
             Unequipped item ID, or None
@@ -89,8 +84,8 @@ class EquipmentSystem(System):
             item_id = equipment.unequip_weapon()
         elif slot == "armor":
             item_id = equipment.unequip_armor()
-        elif slot == "jewelry":
-            item_id = equipment.unequip_jewelry(slot_index)
+        elif slot == "ring":
+            item_id = equipment.unequip_ring()
 
         # Add to inventory
         if item_id is not None:
@@ -101,27 +96,31 @@ class EquipmentSystem(System):
 
     def recalculate_stats(self, entity_id: int) -> None:
         """
-        Recalculate entity stats based on equipment.
+        Recalculate entity stats based on equipment and character.
 
         Args:
             entity_id: Entity to recalculate
         """
         stats = self.world.get_component(entity_id, StatsComponent)
         equipment = self.world.get_component(entity_id, EquipmentComponent)
+        player = self.world.get_component(entity_id, PlayerComponent)
 
         if not all([stats, equipment]):
             return
 
-        # Base stats (could be stored separately, but for simplicity we reset)
-        base_hp = 100
-        base_damage = 10
-        base_attack_speed = 1.0
-        base_crit_chance = 0.05
-        base_crit_mult = 2.0
-        base_defense = 0
+        # Get character multipliers
+        char = get_character(player.character_id if player else "warrior")
+
+        # Base stats with character multipliers
+        base_hp = int(100 * char.hp_mult)
+        base_damage = 10 * char.damage_mult
+        base_attack_speed = 1.0 * char.attack_speed_mult
+        base_crit_chance = 0.05 * char.crit_chance_mult
+        base_crit_mult = 2.0 * char.crit_damage_mult
+        base_defense = int(5 * char.defense_mult)
         base_resistance = 0.0
         base_dodge = 0.0
-        base_life_steal = 0.0
+        base_life_steal = char.life_steal_base
         base_true_damage = 0.0
 
         # Add bonuses from all equipped items

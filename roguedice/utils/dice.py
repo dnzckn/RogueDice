@@ -1,8 +1,8 @@
-"""Dice rolling utilities."""
+"""Dice rolling utilities with advanced mechanics."""
 
 import random
 import re
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 
 def roll_dice(num_dice: int, sides: int) -> List[int]:
@@ -36,9 +36,14 @@ def roll_2d6() -> Tuple[int, int, int]:
     return (die1, die2, die1 + die2)
 
 
-def roll_formula(formula: str, special: str = "none") -> Tuple[List[int], int, int]:
+def roll_formula(
+    formula: str,
+    special: str = "none",
+    momentum: int = 0,
+    death_stacks: int = 0,
+) -> Tuple[List[int], int, int, dict]:
     """
-    Roll dice based on a formula string.
+    Roll dice based on a formula string with special mechanics.
 
     Supports formats:
     - "2d6" - roll 2 six-sided dice
@@ -50,24 +55,69 @@ def roll_formula(formula: str, special: str = "none") -> Tuple[List[int], int, i
     Special rules:
     - "none" - normal rolling
     - "reroll_ones" - reroll any 1s once
+    - "exploding" - on max value, roll again and add
+    - "doubles_bonus" - if doubles, double the total
+    - "momentum" - add momentum value to roll
+    - "random_dice" - random die type (d4, d6, d8, d10, d12, d20)
+    - "cursed_fortune" - roll 3d6, 80% keep best 2, 20% keep worst 2
 
     Args:
         formula: Dice formula string
         special: Special rolling rule
+        momentum: Current momentum stacks (for warrior)
+        death_stacks: Kills for necromancer die scaling (0-4 = d6/d8/d10/d12/d20)
 
     Returns:
-        Tuple of (individual_rolls, modifier, total)
+        Tuple of (individual_rolls, modifier, total, extra_info)
+        extra_info contains: rolled_doubles, exploded, cursed, etc.
     """
     rolls = []
     modifier = 0
+    extra_info = {
+        "rolled_doubles": False,
+        "exploded": False,
+        "cursed": False,
+        "random_die": None,
+    }
+
+    # Handle special: random_dice (Jester)
+    if special == "random_dice":
+        die_types = [4, 6, 8, 10, 12, 20]
+        chosen_die = random.choice(die_types)
+        extra_info["random_die"] = chosen_die
+        formula = f"1d{chosen_die}"
+
+    # Handle death_stacks (Necromancer) - upgrade die size
+    if death_stacks > 0 and "1d6" in formula.lower():
+        die_progression = [6, 8, 10, 12, 20]
+        stack_index = min(death_stacks, len(die_progression) - 1)
+        new_die = die_progression[stack_index]
+        formula = formula.lower().replace("1d6", f"1d{new_die}")
+
+    # Handle special: cursed_fortune (Gambler)
+    if special == "cursed_fortune":
+        # Roll 3d6
+        three_rolls = [random.randint(1, 6) for _ in range(3)]
+
+        # 80% chance to keep best 2, 20% chance to keep worst 2
+        if random.random() < 0.8:
+            # Keep best 2
+            three_rolls.sort(reverse=True)
+            rolls = three_rolls[:2]
+        else:
+            # Cursed! Keep worst 2
+            three_rolls.sort()
+            rolls = three_rolls[:2]
+            extra_info["cursed"] = True
+
+        total = sum(rolls) + modifier
+        return (rolls, modifier, total, extra_info)
 
     # Parse the formula
-    # Examples: "2d6", "1d6+1d8", "2d4+2"
     parts = formula.lower().replace(" ", "").split("+")
 
     for part in parts:
         if "d" in part:
-            # It's a dice roll (e.g., "2d6")
             match = re.match(r"(\d+)d(\d+)", part)
             if match:
                 num_dice = int(match.group(1))
@@ -80,35 +130,68 @@ def roll_formula(formula: str, special: str = "none") -> Tuple[List[int], int, i
                     if special == "reroll_ones" and roll == 1:
                         roll = random.randint(1, sides)
 
+                    # Apply exploding rule
+                    if special == "exploding" and roll == sides:
+                        extra_info["exploded"] = True
+                        # Keep rolling while we hit max
+                        while roll == sides:
+                            extra_roll = random.randint(1, sides)
+                            rolls.append(roll)
+                            roll = extra_roll
+
                     rolls.append(roll)
         else:
-            # It's a flat modifier (e.g., "+2")
             try:
                 modifier += int(part)
             except ValueError:
                 pass
 
+    # Check for doubles (for doubles_bonus and paladin shield)
+    if len(rolls) == 2 and rolls[0] == rolls[1]:
+        extra_info["rolled_doubles"] = True
+
+    # Apply momentum bonus
+    if special == "momentum" and momentum > 0:
+        modifier += momentum
+
+    # Calculate total
     total = sum(rolls) + modifier
-    return (rolls, modifier, total)
+
+    # Apply doubles bonus (Monk) - double the total
+    if special == "doubles_bonus" and extra_info["rolled_doubles"]:
+        total *= 2
+
+    return (rolls, modifier, total, extra_info)
 
 
-def roll_for_character(character_id: str) -> Tuple[List[int], int, int]:
+def roll_for_character(
+    character_id: str,
+    momentum: int = 0,
+    death_stacks: int = 0,
+) -> Tuple[List[int], int, int, dict]:
     """
     Roll movement dice for a specific character.
 
     Args:
         character_id: Character template ID
+        momentum: Current momentum stacks
+        death_stacks: Kill stacks for necromancer
 
     Returns:
-        Tuple of (individual_rolls, modifier, total)
+        Tuple of (individual_rolls, modifier, total, extra_info)
     """
     from ..models.characters import get_character
 
     character = get_character(character_id)
-    return roll_formula(character.dice_formula, character.dice_special)
+    return roll_formula(
+        character.dice_formula,
+        character.dice_special,
+        momentum=momentum,
+        death_stacks=death_stacks,
+    )
 
 
-def format_roll(rolls: List[int], modifier: int, total: int) -> str:
+def format_roll(rolls: List[int], modifier: int, total: int, extra_info: dict = None) -> str:
     """
     Format a dice roll result as a readable string.
 
@@ -116,17 +199,33 @@ def format_roll(rolls: List[int], modifier: int, total: int) -> str:
         rolls: Individual die results
         modifier: Flat modifier
         total: Total result
+        extra_info: Optional extra info dict
 
     Returns:
         Formatted string like "3+4+2=9" or "3+4+2+2=11"
     """
     roll_str = "+".join(str(r) for r in rolls)
+
+    result = ""
     if modifier > 0:
-        return f"{roll_str}+{modifier}={total}"
+        result = f"{roll_str}+{modifier}={total}"
     elif modifier < 0:
-        return f"{roll_str}{modifier}={total}"
+        result = f"{roll_str}{modifier}={total}"
     else:
-        return f"{roll_str}={total}"
+        result = f"{roll_str}={total}"
+
+    # Add special indicators
+    if extra_info:
+        if extra_info.get("exploded"):
+            result += " EXPLODED!"
+        if extra_info.get("rolled_doubles"):
+            result += " DOUBLES!"
+        if extra_info.get("cursed"):
+            result += " CURSED!"
+        if extra_info.get("random_die"):
+            result = f"d{extra_info['random_die']}: " + result
+
+    return result
 
 
 def roll_d20() -> int:

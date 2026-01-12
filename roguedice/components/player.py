@@ -29,6 +29,18 @@ class PlayerComponent(Component):
     boss_defeated: bool = False
     continuing_after_boss: bool = False  # True if player chose to continue
 
+    # Character-specific mechanics
+    momentum: int = 0  # Warrior: builds +1 per non-combat move
+    combo_stacks: int = 0  # Monk: builds stacks for damage
+    death_stacks: int = 0  # Necromancer: kills / 5 = die upgrade level
+    temp_shield: int = 0  # Paladin: temporary HP from doubles
+    poison_stacks: int = 0  # Rogue: poison damage to apply
+
+    # Last roll info (for UI display)
+    last_roll_doubled: bool = False
+    last_roll_exploded: bool = False
+    last_roll_cursed: bool = False
+
     # Sprite info
     sprite_name: str = "player"
 
@@ -44,6 +56,62 @@ class PlayerComponent(Component):
         self.tick_blessings()
 
         return True
+
+    def on_move(self, had_combat: bool = False) -> None:
+        """Called after each move to update character mechanics."""
+        if had_combat:
+            # Combat resets momentum
+            self.momentum = 0
+            self.poison_stacks = 0
+        else:
+            # Non-combat move builds momentum
+            self.momentum += 1
+
+    def on_combat_start(self, movement_roll: int) -> None:
+        """Called when combat starts to apply character effects."""
+        # Rogue poison = movement roll
+        from ..models.characters import get_character
+        char = get_character(self.character_id)
+        if char.poison_damage:
+            self.poison_stacks = movement_roll
+
+    def on_kill(self) -> None:
+        """Called when player kills a monster."""
+        self.monsters_killed += 1
+
+        # Necromancer death stacks (every 5 kills = +1 stack, max 4)
+        from ..models.characters import get_character
+        char = get_character(self.character_id)
+        if char.death_stacks:
+            self.death_stacks = min(4, self.monsters_killed // 5)
+
+        # Monk combo stacks
+        if char.combo_master:
+            self.combo_stacks += 1
+
+    def on_doubles_rolled(self, roll_total: int) -> None:
+        """Called when doubles are rolled."""
+        from ..models.characters import get_character
+        char = get_character(self.character_id)
+
+        # Paladin shield on doubles
+        if char.shield_on_doubles:
+            self.temp_shield += roll_total
+
+    def consume_temp_shield(self, damage: int) -> int:
+        """
+        Consume temp shield before taking damage.
+        Returns remaining damage after shield.
+        """
+        if self.temp_shield > 0:
+            if damage <= self.temp_shield:
+                self.temp_shield -= damage
+                return 0
+            else:
+                damage -= self.temp_shield
+                self.temp_shield = 0
+                return damage
+        return damage
 
     def add_gold(self, amount: int) -> None:
         """Add gold to player (applies gold multiplier)."""

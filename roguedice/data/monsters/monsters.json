@@ -154,6 +154,27 @@
         "hp_per_round": 35,
         "damage_per_round": 8
       }
+    },
+    {
+      "id": "boss_dragon",
+      "name": "Ancient Dragon",
+      "tier": 10,
+      "is_boss": true,
+      "base_hp": 800,
+      "base_damage": 60,
+      "attack_speed": 0.6,
+      "defense": 30,
+      "crit_chance": 0.2,
+      "crit_multiplier": 2.5,
+      "true_damage": 15,
+      "life_steal": 0.1,
+      "sprite": "dragon",
+      "drop_chance": 1.0,
+      "gold_reward": 500,
+      "scaling": {
+        "hp_per_round": 50,
+        "damage_per_round": 10
+      }
     }
   ]
 }

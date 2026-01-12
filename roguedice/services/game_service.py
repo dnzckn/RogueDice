@@ -234,7 +234,7 @@ class GameService:
             # Create a powerful boss monster
             boss_id = self.monster_factory.create_monster(
                 current_round=player.current_round + 5,  # Boss is stronger
-                template_id="boss",
+                template_id="boss_dragon",
             )
             if boss_id:
                 boss_square.place_monster(boss_id)
@@ -443,8 +443,8 @@ class GameService:
             old_item_id = equipment.armor
             equipment.armor = item_id
         elif item.item_type == ItemType.JEWELRY:
-            old_item_id = equipment.jewelry_slots[slot_index]
-            equipment.jewelry_slots[slot_index] = item_id
+            old_item_id = equipment.ring
+            equipment.ring = item_id
 
         # Sell old item
         gold_earned = 0
