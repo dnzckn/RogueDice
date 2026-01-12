@@ -50,6 +50,12 @@ class BattleState:
     action_timer: float = 0.0
     action_duration: float = 0.8
 
+    # Monster entrance animation (for boss fights)
+    monster_entrance: bool = False
+    entrance_timer: float = 0.0
+    entrance_duration: float = 1.5
+    monster_entrance_x: float = -100  # Start off-screen left
+
     # Sprite shake states
     player_shake: float = 0.0
     monster_shake: float = 0.0
@@ -128,7 +134,8 @@ class BattleScene:
     def start_battle(self, char_id: str, monster_type: str, monster_name: str,
                      is_boss: bool, combat_result: CombatResult,
                      player_max_hp: int, monster_max_hp: int,
-                     player_start_hp: int, monster_start_hp: int) -> None:
+                     player_start_hp: int, monster_start_hp: int,
+                     monster_entrance: bool = False) -> None:
         """Start a new battle animation sequence."""
         self.player_char_id = char_id
         self.monster_type = monster_type
@@ -152,6 +159,10 @@ class BattleScene:
             actions=actions,
             current_action_index=0,
             action_timer=0.0,
+            monster_entrance=monster_entrance,
+            entrance_timer=0.0,
+            entrance_duration=1.5 if monster_entrance else 0.0,
+            monster_entrance_x=-100 if monster_entrance else 0,
             displayed_player_hp=player_start_hp,
             displayed_monster_hp=monster_start_hp,
             target_player_hp=player_start_hp,
@@ -230,6 +241,20 @@ class BattleScene:
 
         # Speed multiplier
         speed_mult = self.state.speed.value if self.state.speed != BattleSpeed.INSTANT else 100.0
+
+        # Handle monster entrance animation first
+        if self.state.monster_entrance:
+            self.state.entrance_timer += dt
+            progress = min(1.0, self.state.entrance_timer / self.state.entrance_duration)
+            # Ease out cubic for smooth deceleration
+            eased = 1 - (1 - progress) ** 3
+            # Move from -100 to final position (0)
+            self.state.monster_entrance_x = -100 + eased * 100
+
+            if progress >= 1.0:
+                self.state.monster_entrance = False
+                self.state.monster_entrance_x = 0
+            return  # Don't process combat during entrance
 
         # Update action timer
         self.state.action_timer += dt * speed_mult
@@ -436,6 +461,10 @@ class BattleScene:
 
         # Base position (panel-relative, top-right)
         x, y = self.PANEL_WIDTH - 100, 100
+
+        # Apply entrance animation offset (monster enters from left)
+        if self.state.monster_entrance:
+            x += int(self.state.monster_entrance_x)
 
         # Apply shake
         if self.state.monster_shake > 0:

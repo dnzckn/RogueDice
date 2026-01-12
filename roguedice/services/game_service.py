@@ -49,11 +49,15 @@ class TurnResult:
     blessing_received: Optional[Blessing] = None
     gold_earned: int = 0
     healed: bool = False
+    heal_amount: int = 0  # Amount healed (for animations)
     monsters_spawned: List[int] = field(default_factory=list)
     opened_merchant: bool = False
     game_over: bool = False
     victory: bool = False  # Boss defeated
     is_boss_fight: bool = False
+    trigger_minigame: Optional[str] = None  # "timing", "roulette", "claw", "flappy"
+    minigame_corner: int = 0  # Which corner triggered minigame (10, 20, or 30)
+    trigger_monster_minigame: bool = False  # Monster attack from curse square
 
 
 class GameService:
@@ -201,8 +205,16 @@ class GameService:
 
         result = TurnResult(move_result=move_result)
 
-        # Check for monster spawn (every 4 rounds)
+        # Check for lap completion (passed start square)
         if move_result.laps_completed > 0:
+            # Heal 30% of max HP when passing start
+            heal_amount = int(player_stats.max_hp * 0.3)
+            actual_heal = player_stats.heal(heal_amount)
+            if actual_heal > 0:
+                result.healed = True
+                result.heal_amount = actual_heal
+
+            # Spawn monsters (every 4 rounds)
             result.monsters_spawned = self.spawn_system.check_and_spawn(
                 player.current_round
             )
@@ -298,6 +310,15 @@ class GameService:
         player_stats: StatsComponent,
     ) -> None:
         """Process landing on a square."""
+        import random
+
+        # Corner squares (10, 20, 30) trigger random minigames FIRST
+        # After minigame completes, UI will call process_corner_function()
+        if square.index in [10, 20, 30]:
+            minigames = ["timing", "roulette", "claw", "flappy", "archery", "blacksmith"]
+            result.trigger_minigame = random.choice(minigames)
+            result.minigame_corner = square.index
+            return  # Don't process corner function yet - UI handles it after minigame
 
         if square.triggers_combat and square.monster_entity_ids:
             # Check if this is the boss fight
@@ -404,6 +425,10 @@ class GameService:
         elif square.square_type == SquareType.CURSE:
             # CURSE: Spawn monsters on random empty monster squares!
             result.monsters_spawned = self._trigger_curse(player.current_round)
+            # 35% chance to also trigger monster attack minigame
+            import random
+            if random.random() < 0.35:
+                result.trigger_monster_minigame = True
 
     def _trigger_curse(self, current_round: int) -> List[int]:
         """Trigger curse effect - spawn 2-4 monsters on random empty squares."""
@@ -431,6 +456,48 @@ class GameService:
             spawned_squares.append(square.index)
 
         return spawned_squares
+
+    def process_corner_function(self, corner_index: int) -> dict:
+        """
+        Process the corner's normal function after minigame completes.
+        Called by UI after minigame ends.
+
+        Returns dict with what happened: {'healed': bool, 'opened_merchant': bool, 'boss_fight': bool}
+        """
+        result = {'healed': False, 'opened_merchant': False, 'boss_fight': False}
+
+        if not self.player_id:
+            return result
+
+        player = self.world.get_component(self.player_id, PlayerComponent)
+        player_stats = self.world.get_component(self.player_id, StatsComponent)
+
+        if not player or not player_stats:
+            return result
+
+        if corner_index == 10:
+            # Shop - generate merchant inventory
+            self._generate_merchant_inventory(player.current_round)
+            result['opened_merchant'] = True
+
+        elif corner_index == 20:
+            # Inn - full heal
+            character = get_character(player.character_id)
+            heal_mult = character.heal_on_rest_mult
+            if heal_mult > 1.0:
+                heal_amount = int(player_stats.max_hp * heal_mult)
+                player_stats.heal(heal_amount)
+            else:
+                player_stats.full_heal()
+            result['healed'] = True
+
+        elif corner_index == 30:
+            # Boss Arena - check if boss fight needed
+            if self.boss_active and not player.boss_defeated:
+                result['boss_fight'] = True
+                # Boss fight will be handled by normal game flow on next check
+
+        return result
 
     def _apply_blessing_combat_bonuses(
         self, player: PlayerComponent, stats: StatsComponent

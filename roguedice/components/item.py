@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from typing import List
 from ..core.component import Component
-from ..models.enums import ItemType, Rarity
+from ..models.enums import ItemType, Rarity, ItemTheme, Element
 
 
 @dataclass
@@ -15,6 +15,10 @@ class ItemComponent(Component):
     rarity: Rarity = Rarity.COMMON
     level: int = 1
     template_id: str = ""  # Reference to base template
+
+    # Theme system
+    theme: ItemTheme = ItemTheme.NONE
+    element: Element = Element.NONE  # Only used if theme == ELEMENTAL
 
     # Stat modifiers (added to base stats when equipped)
     damage_bonus: float = 0.0
@@ -42,8 +46,9 @@ class ItemComponent(Component):
 
     @property
     def display_name(self) -> str:
-        """Get formatted display name with tier prefix."""
-        return f"T{self.level}: {self.base_name}"
+        """Get formatted display name with tier prefix and theme."""
+        theme_prefix = f"[{self.theme_display}] " if self.theme != ItemTheme.NONE else ""
+        return f"{theme_prefix}T{self.level}: {self.base_name}"
 
     @property
     def base_name(self) -> str:
@@ -86,3 +91,45 @@ class ItemComponent(Component):
     @property
     def is_jewelry(self) -> bool:
         return self.item_type == ItemType.JEWELRY
+
+    @property
+    def theme_display(self) -> str:
+        """Get theme display string for UI."""
+        if self.theme == ItemTheme.NONE:
+            return ""
+        if self.theme == ItemTheme.ELEMENTAL and self.element != Element.NONE:
+            return f"{self.element.display_name} {self.theme.display_name}"
+        return self.theme.display_name
+
+    @property
+    def theme_effect_description(self) -> str:
+        """Get description of theme effect for tooltips."""
+        if self.theme == ItemTheme.NONE:
+            return ""
+        elif self.theme == ItemTheme.CYBERPUNK:
+            return "Bonus gold + Neural Hack reduces enemy damage"
+        elif self.theme == ItemTheme.STEAMPUNK:
+            return "Builds pressure, releases STEAM BURST!"
+        elif self.theme == ItemTheme.MAGICAL:
+            return "Mana Burst with Arcane Amplification"
+        elif self.theme == ItemTheme.ELEMENTAL:
+            return self._get_element_description()
+        elif self.theme == ItemTheme.ANGELIC:
+            return "Divine healing + Guardian Angel saves you once!"
+        elif self.theme == ItemTheme.DEMONIC:
+            return "Blood Pact: More damage at low HP + Soul Harvest"
+        return ""
+
+    def _get_element_description(self) -> str:
+        """Get element-specific effect description."""
+        if self.element == Element.FIRE:
+            return "INFERNO: Stacking burns up to 3x damage!"
+        elif self.element == Element.WATER:
+            return "Tidal Wave: Flinch + Soaked (+25% dmg taken)"
+        elif self.element == Element.WIND:
+            return "Zephyr: Free Gust attacks + Dodge bonus"
+        elif self.element == Element.EARTH:
+            return "Fortress: Damage reduction + Tremor stuns"
+        elif self.element == Element.ELECTRIC:
+            return "Storm: Paralyze + bonus damage (Chain with Water!)"
+        return ""

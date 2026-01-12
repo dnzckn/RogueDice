@@ -14,7 +14,7 @@ import random
 import ctypes
 from pathlib import Path
 from typing import Dict, Tuple, Optional, List
-from ..models.enums import Rarity, ItemType, SquareType
+from ..models.enums import Rarity, ItemType, SquareType, ItemTheme, Element
 
 
 class SuppressLibpngWarnings:
@@ -500,44 +500,758 @@ class SpriteGenerator:
     # ========== ITEM ICONS ==========
 
     def create_item_icon(self, item_type: ItemType, rarity: Rarity,
-                         level: int, size: int = 64) -> pygame.Surface:
+                         level: int, size: int = 64,
+                         theme: ItemTheme = None, element: Element = None) -> pygame.Surface:
         """Create a polished item icon."""
-        key = f"item_{item_type.name}_{rarity.name}_{level}_{size}"
-        return self.get_or_create(key, self._create_item_impl, item_type, rarity, level, size)
+        theme_name = theme.name if theme else "NONE"
+        element_name = element.name if element else "NONE"
+        key = f"item_{item_type.name}_{rarity.name}_{level}_{size}_{theme_name}_{element_name}"
+        return self.get_or_create(key, self._create_item_impl, item_type, rarity, level, size, theme, element)
 
     def _create_item_impl(self, item_type: ItemType, rarity: Rarity,
-                          level: int, size: int) -> pygame.Surface:
+                          level: int, size: int,
+                          item_theme: ItemTheme = None, element: Element = None) -> pygame.Surface:
         # Try to load from external assets first
         asset_icon = self.asset_loader.get_item_icon(item_type, rarity, level, size)
         if asset_icon:
             return asset_icon
 
-        # Fall back to procedural generation
+        # Fall back to procedural generation with ENHANCED visuals
         surf = pygame.Surface((size, size), pygame.SRCALPHA)
 
         colors = RARITY_SCHEMES.get(rarity, RARITY_SCHEMES[Rarity.COMMON])
         main_color, dark_color, light_color, glow_color = colors
 
-        # Draw glow for rare+ items
-        if glow_color:
-            for i in range(3):
-                glow_alpha = 30 - i * 10
-                glow_surf = pygame.Surface((size, size), pygame.SRCALPHA)
-                pygame.draw.circle(glow_surf, (*glow_color, glow_alpha),
-                                  (size // 2, size // 2), size // 2 - i * 4)
-                surf.blit(glow_surf, (0, 0))
+        # Determine tier from level (affects size/complexity)
+        # Tier 1: levels 1-5, Tier 2: 6-10, Tier 3: 11-15, Tier 4: 16+
+        tier = min(4, (level - 1) // 5 + 1)
 
-        # Draw item based on type
-        if item_type == ItemType.WEAPON:
-            self._draw_sword(surf, size, main_color, dark_color, light_color)
-        elif item_type == ItemType.ARMOR:
-            self._draw_armor(surf, size, main_color, dark_color, light_color)
-        elif item_type == ItemType.JEWELRY:
-            self._draw_ring(surf, size, main_color, dark_color, light_color)
+        # Determine theme - use ItemTheme if provided, else fall back to rarity-based
+        if item_theme and item_theme != ItemTheme.NONE:
+            if item_theme == ItemTheme.CYBERPUNK:
+                theme = "cyberpunk"
+            elif item_theme == ItemTheme.STEAMPUNK:
+                theme = "steampunk"
+            elif item_theme == ItemTheme.MAGICAL:
+                theme = "magical"
+            elif item_theme == ItemTheme.ELEMENTAL:
+                # Map element to theme string
+                if element == Element.FIRE:
+                    theme = "fire"
+                elif element == Element.WATER:
+                    theme = "water"
+                elif element == Element.WIND:
+                    theme = "wind"
+                elif element == Element.EARTH:
+                    theme = "earth"
+                elif element == Element.ELECTRIC:
+                    theme = "electric"
+                else:
+                    theme = "magical"
+            elif item_theme == ItemTheme.ANGELIC:
+                theme = "angelic"
+            elif item_theme == ItemTheme.DEMONIC:
+                theme = "demonic"
+            else:
+                theme = "normal"
         else:
-            self._draw_potion(surf, size, main_color, dark_color, light_color)
+            # Fallback: determine theme from rarity
+            if rarity == Rarity.EPIC:
+                theme = "demonic"
+            elif rarity == Rarity.LEGENDARY:
+                theme = "angelic"
+            elif rarity == Rarity.MYTHICAL:
+                theme = "chaotic"
+            elif rarity == Rarity.RARE:
+                theme = "magical"
+            else:
+                theme = "normal"
+
+        # Draw enhanced glow based on rarity and theme
+        self._draw_item_aura(surf, size, rarity, theme, tier)
+
+        # Draw item based on type with tier and theme
+        if item_type == ItemType.WEAPON:
+            self._draw_enhanced_weapon(surf, size, main_color, dark_color, light_color, tier, theme, rarity)
+        elif item_type == ItemType.ARMOR:
+            self._draw_enhanced_armor(surf, size, main_color, dark_color, light_color, tier, theme, rarity)
+        elif item_type == ItemType.JEWELRY:
+            self._draw_enhanced_ring(surf, size, main_color, dark_color, light_color, tier, theme, rarity)
+        else:
+            self._draw_enhanced_potion(surf, size, main_color, dark_color, light_color, tier, theme, rarity)
 
         return surf
+
+    def _draw_item_aura(self, surf: pygame.Surface, size: int, rarity: Rarity, theme: str, tier: int):
+        """Draw background aura/effects based on rarity and theme."""
+        cx, cy = size // 2, size // 2
+
+        if theme == "demonic":
+            # Dark flames and sinister glow
+            for i in range(5):
+                alpha = 50 - i * 10
+                pygame.draw.circle(surf, (80, 20, 40, alpha), (cx, cy), size // 2 - i * 3)
+            # Flickering dark fire particles
+            for i in range(6):
+                fx = cx + int(math.sin(i * 1.2) * size * 0.35)
+                fy = cy + size // 3 - i * 4
+                pygame.draw.circle(surf, (120, 30, 60, 60), (fx, fy), 4 + tier)
+
+        elif theme == "angelic":
+            # Holy golden glow with rays
+            for i in range(6):
+                alpha = 40 - i * 6
+                pygame.draw.circle(surf, (255, 220, 150, alpha), (cx, cy), size // 2 - i * 2)
+            # Light rays
+            for angle in range(0, 360, 45):
+                rad = math.radians(angle)
+                x1 = cx + int(math.cos(rad) * size * 0.2)
+                y1 = cy + int(math.sin(rad) * size * 0.2)
+                x2 = cx + int(math.cos(rad) * size * 0.45)
+                y2 = cy + int(math.sin(rad) * size * 0.45)
+                pygame.draw.line(surf, (255, 240, 200, 40), (x1, y1), (x2, y2), 2)
+
+        elif theme == "chaotic":
+            # Reality-bending multicolor aura
+            for i in range(5):
+                hue_shift = (i * 60) % 360
+                r = int(128 + 127 * math.sin(math.radians(hue_shift)))
+                g = int(128 + 127 * math.sin(math.radians(hue_shift + 120)))
+                b = int(128 + 127 * math.sin(math.radians(hue_shift + 240)))
+                alpha = 35 - i * 6
+                pygame.draw.circle(surf, (r, g, b, alpha), (cx, cy), size // 2 - i * 3)
+            # Crackling energy
+            for i in range(4):
+                angle = random.uniform(0, math.pi * 2)
+                x1 = cx + int(math.cos(angle) * size * 0.15)
+                y1 = cy + int(math.sin(angle) * size * 0.15)
+                x2 = cx + int(math.cos(angle + 0.3) * size * 0.4)
+                y2 = cy + int(math.sin(angle + 0.3) * size * 0.4)
+                pygame.draw.line(surf, (255, 100, 255, 50), (x1, y1), (x2, y2), 1)
+
+        elif theme == "magical":
+            # Subtle purple magical glow with runes
+            for i in range(4):
+                alpha = 30 - i * 7
+                pygame.draw.circle(surf, (148, 103, 255, alpha), (cx, cy), size // 2 - i * 4)
+
+        elif theme == "cyberpunk":
+            # Neon cyan/magenta glow with circuit patterns
+            for i in range(4):
+                alpha = 40 - i * 10
+                pygame.draw.circle(surf, (0, 255, 255, alpha), (cx, cy), size // 2 - i * 3)
+            # Circuit lines
+            for i in range(3):
+                x1 = cx - size // 3 + i * size // 6
+                y1 = cy - size // 4
+                x2 = x1 + size // 8
+                y2 = y1 + size // 3
+                pygame.draw.line(surf, (255, 0, 255, 50), (x1, y1), (x2, y2), 1)
+                pygame.draw.circle(surf, (0, 255, 255, 70), (x2, y2), 2)
+
+        elif theme == "steampunk":
+            # Copper/brass glow with gear patterns
+            for i in range(4):
+                alpha = 35 - i * 8
+                pygame.draw.circle(surf, (184, 115, 51, alpha), (cx, cy), size // 2 - i * 3)
+            # Small gears
+            for angle in range(0, 360, 60):
+                rad = math.radians(angle)
+                gx = cx + int(math.cos(rad) * size * 0.3)
+                gy = cy + int(math.sin(rad) * size * 0.3)
+                pygame.draw.circle(surf, (205, 127, 50, 50), (gx, gy), 3 + tier)
+
+        elif theme == "fire":
+            # Orange-red flame aura
+            for i in range(5):
+                alpha = 45 - i * 9
+                pygame.draw.circle(surf, (255, 100, 30, alpha), (cx, cy), size // 2 - i * 3)
+            # Flame particles
+            for i in range(5):
+                fx = cx + int(math.sin(i * 1.5) * size * 0.3)
+                fy = cy - size // 4 + i * 3
+                pygame.draw.circle(surf, (255, 150, 50, 60), (fx, fy), 3 + tier)
+
+        elif theme == "water":
+            # Blue ripple effect
+            for i in range(5):
+                alpha = 35 - i * 7
+                pygame.draw.circle(surf, (50, 150, 255, alpha), (cx, cy), size // 2 - i * 3)
+            # Ripple rings
+            for i in range(2):
+                pygame.draw.circle(surf, (100, 200, 255, 30), (cx, cy), size // 4 + i * 8, 1)
+
+        elif theme == "wind":
+            # Light green swirling aura
+            for i in range(4):
+                alpha = 30 - i * 7
+                pygame.draw.circle(surf, (200, 255, 200, alpha), (cx, cy), size // 2 - i * 4)
+            # Swirl lines
+            for i in range(3):
+                angle = i * 2.1
+                x1 = cx + int(math.cos(angle) * size * 0.2)
+                y1 = cy + int(math.sin(angle) * size * 0.2)
+                x2 = cx + int(math.cos(angle + 1) * size * 0.4)
+                y2 = cy + int(math.sin(angle + 1) * size * 0.4)
+                pygame.draw.line(surf, (150, 255, 150, 50), (x1, y1), (x2, y2), 2)
+
+        elif theme == "earth":
+            # Brown rocky aura
+            for i in range(4):
+                alpha = 35 - i * 8
+                pygame.draw.circle(surf, (139, 90, 43, alpha), (cx, cy), size // 2 - i * 3)
+            # Rock particles
+            for i in range(4):
+                rx = cx + int(math.cos(i * 1.6) * size * 0.35)
+                ry = cy + int(math.sin(i * 1.6) * size * 0.35)
+                pygame.draw.polygon(surf, (100, 70, 30, 60), [
+                    (rx, ry - 3), (rx + 3, ry + 2), (rx - 3, ry + 2)
+                ])
+
+        elif theme == "electric":
+            # Yellow lightning aura
+            for i in range(4):
+                alpha = 40 - i * 10
+                pygame.draw.circle(surf, (255, 255, 50, alpha), (cx, cy), size // 2 - i * 3)
+            # Lightning bolts
+            for i in range(3):
+                angle = i * 2.1
+                x1 = cx + int(math.cos(angle) * size * 0.15)
+                y1 = cy + int(math.sin(angle) * size * 0.15)
+                x2 = cx + int(math.cos(angle + 0.5) * size * 0.35)
+                y2 = cy + int(math.sin(angle + 0.5) * size * 0.35)
+                x_mid = (x1 + x2) // 2 + random.randint(-3, 3)
+                y_mid = (y1 + y2) // 2 + random.randint(-3, 3)
+                pygame.draw.line(surf, (255, 255, 100, 70), (x1, y1), (x_mid, y_mid), 1)
+                pygame.draw.line(surf, (255, 255, 100, 70), (x_mid, y_mid), (x2, y2), 1)
+
+    def _draw_enhanced_weapon(self, surf: pygame.Surface, size: int,
+                              main: Tuple, dark: Tuple, light: Tuple,
+                              tier: int, theme: str, rarity: Rarity):
+        """Draw an enhanced weapon that scales with tier and changes with theme."""
+        cx, cy = size // 2, size // 2
+
+        # Weapon type varies by tier (sword -> greatsword -> demonic blade)
+        blade_length = size // 8 + tier * (size // 12)
+        blade_width = size // 6 + tier * 2
+        guard_width = size // 2 + tier * 4
+
+        # Theme-based blade colors
+        if theme == "demonic":
+            blade_color = (60, 20, 30)
+            blade_edge = (180, 50, 50)
+            blade_highlight = (255, 100, 80)
+        elif theme == "angelic":
+            blade_color = (240, 240, 255)
+            blade_edge = (255, 220, 150)
+            blade_highlight = (255, 255, 255)
+        elif theme == "chaotic":
+            blade_color = (80, 40, 120)
+            blade_edge = (200, 100, 255)
+            blade_highlight = (255, 180, 255)
+        elif theme == "magical":
+            blade_color = (148, 103, 255)
+            blade_edge = (180, 140, 255)
+            blade_highlight = (220, 200, 255)
+        elif theme == "cyberpunk":
+            blade_color = (0, 180, 180)
+            blade_edge = (0, 255, 255)
+            blade_highlight = (200, 255, 255)
+        elif theme == "steampunk":
+            blade_color = (140, 90, 40)
+            blade_edge = (184, 115, 51)
+            blade_highlight = (220, 170, 100)
+        elif theme == "fire":
+            blade_color = (200, 80, 20)
+            blade_edge = (255, 100, 30)
+            blade_highlight = (255, 180, 80)
+        elif theme == "water":
+            blade_color = (40, 120, 200)
+            blade_edge = (50, 150, 255)
+            blade_highlight = (150, 200, 255)
+        elif theme == "wind":
+            blade_color = (160, 220, 160)
+            blade_edge = (200, 255, 200)
+            blade_highlight = (230, 255, 230)
+        elif theme == "earth":
+            blade_color = (100, 70, 35)
+            blade_edge = (139, 90, 43)
+            blade_highlight = (180, 140, 100)
+        elif theme == "electric":
+            blade_color = (200, 200, 50)
+            blade_edge = (255, 255, 50)
+            blade_highlight = (255, 255, 180)
+        else:
+            blade_color = (200, 210, 220)
+            blade_edge = (150, 160, 170)
+            blade_highlight = (240, 245, 255)
+
+        # Draw blade - bigger and more elaborate at higher tiers
+        tip_y = size // 10 - tier * 2
+        base_y = cy + size // 8
+
+        # Main blade shape
+        if tier >= 3:
+            # Elaborate blade with curves
+            blade_points = [
+                (cx, tip_y),
+                (cx + blade_width // 2 + tier, cy - size // 6),
+                (cx + blade_width // 2, base_y - 5),
+                (cx + blade_width // 4, base_y),
+                (cx - blade_width // 4, base_y),
+                (cx - blade_width // 2, base_y - 5),
+                (cx - blade_width // 2 - tier, cy - size // 6),
+            ]
+        else:
+            blade_points = [
+                (cx, tip_y),
+                (cx + blade_width // 2, cy - size // 8),
+                (cx + blade_width // 3, base_y),
+                (cx - blade_width // 3, base_y),
+                (cx - blade_width // 2, cy - size // 8),
+            ]
+
+        pygame.draw.polygon(surf, blade_color, blade_points)
+        pygame.draw.polygon(surf, blade_edge, blade_points, 2)
+
+        # Blade center highlight
+        pygame.draw.line(surf, blade_highlight, (cx, tip_y + 5), (cx, base_y - 5), 2 + tier // 2)
+
+        # Theme-specific blade decorations
+        if theme == "demonic":
+            # Serrated edges and evil runes
+            for i in range(tier + 2):
+                spike_y = tip_y + 10 + i * (size // 10)
+                pygame.draw.polygon(surf, (100, 30, 30), [
+                    (cx + blade_width // 2 - 2, spike_y),
+                    (cx + blade_width // 2 + 4 + tier, spike_y + 4),
+                    (cx + blade_width // 2 - 2, spike_y + 8),
+                ])
+                pygame.draw.polygon(surf, (100, 30, 30), [
+                    (cx - blade_width // 2 + 2, spike_y),
+                    (cx - blade_width // 2 - 4 - tier, spike_y + 4),
+                    (cx - blade_width // 2 + 2, spike_y + 8),
+                ])
+            # Glowing rune
+            if tier >= 2:
+                pygame.draw.circle(surf, (255, 50, 50), (cx, cy - size // 8), 4)
+                pygame.draw.circle(surf, (255, 150, 100), (cx, cy - size // 8), 2)
+
+        elif theme == "angelic":
+            # Wing motifs and holy symbols
+            wing_y = cy - size // 6
+            if tier >= 2:
+                # Small wing decorations on blade
+                pygame.draw.ellipse(surf, (255, 240, 200), (cx - blade_width, wing_y - 3, blade_width // 2, 8))
+                pygame.draw.ellipse(surf, (255, 240, 200), (cx + blade_width // 2, wing_y - 3, blade_width // 2, 8))
+            # Holy gem
+            if tier >= 3:
+                pygame.draw.circle(surf, (255, 255, 200), (cx, cy - size // 8), 5)
+                pygame.draw.circle(surf, (255, 255, 255), (cx - 1, cy - size // 8 - 1), 2)
+
+        elif theme == "chaotic":
+            # Crackling energy along blade
+            for i in range(tier + 1):
+                ey = tip_y + 8 + i * (size // 8)
+                ex_off = random.randint(-3, 3)
+                pygame.draw.circle(surf, (200, 100, 255), (cx + ex_off, ey), 3)
+                pygame.draw.circle(surf, (255, 200, 255), (cx + ex_off, ey), 1)
+
+        # Guard - more elaborate at higher tiers
+        guard_y = base_y
+        if tier >= 3:
+            # Ornate curved guard
+            pygame.draw.arc(surf, main, (cx - guard_width // 2, guard_y - 5, guard_width, 15), 0, math.pi, 4)
+            pygame.draw.circle(surf, light, (cx - guard_width // 2 + 3, guard_y), 4)
+            pygame.draw.circle(surf, light, (cx + guard_width // 2 - 3, guard_y), 4)
+        else:
+            pygame.draw.rect(surf, main, (cx - guard_width // 2, guard_y, guard_width, size // 12))
+            pygame.draw.rect(surf, dark, (cx - guard_width // 2, guard_y, guard_width, size // 12), 1)
+
+        # Handle
+        handle_height = size // 4
+        handle_color = (80, 60, 40) if theme != "demonic" else (40, 20, 20)
+        pygame.draw.rect(surf, handle_color, (cx - size // 14, guard_y + size // 12, size // 7, handle_height))
+        # Handle wrap
+        wrap_color = main if theme != "angelic" else (200, 180, 100)
+        for i in range(3):
+            wy = guard_y + size // 12 + 4 + i * (handle_height // 4)
+            pygame.draw.line(surf, wrap_color, (cx - size // 14, wy), (cx + size // 14, wy), 2)
+
+        # Pommel - gem for higher rarities
+        pommel_y = guard_y + size // 12 + handle_height
+        pommel_size = 4 + tier
+        pygame.draw.circle(surf, main, (cx, pommel_y), pommel_size)
+        if rarity.value >= Rarity.RARE.value:
+            # Glowing gem
+            gem_color = light if theme != "demonic" else (255, 80, 80)
+            pygame.draw.circle(surf, gem_color, (cx, pommel_y), pommel_size - 2)
+            pygame.draw.circle(surf, (255, 255, 255), (cx - 1, pommel_y - 1), pommel_size // 3)
+
+    def _draw_enhanced_armor(self, surf: pygame.Surface, size: int,
+                             main: Tuple, dark: Tuple, light: Tuple,
+                             tier: int, theme: str, rarity: Rarity):
+        """Draw enhanced armor that scales with tier and theme."""
+        cx, cy = size // 2, size // 2
+
+        # Theme-based armor colors
+        if theme == "demonic":
+            armor_main = (50, 30, 40)
+            armor_dark = (30, 15, 25)
+            armor_light = (100, 50, 60)
+            accent = (180, 50, 50)
+        elif theme == "angelic":
+            armor_main = (240, 230, 200)
+            armor_dark = (200, 180, 140)
+            armor_light = (255, 250, 240)
+            accent = (255, 220, 100)
+        elif theme == "chaotic":
+            armor_main = (80, 60, 100)
+            armor_dark = (50, 35, 70)
+            armor_light = (140, 100, 180)
+            accent = (200, 100, 255)
+        elif theme == "magical":
+            armor_main = (120, 100, 180)
+            armor_dark = (80, 60, 140)
+            armor_light = (180, 160, 220)
+            accent = (148, 103, 255)
+        elif theme == "cyberpunk":
+            armor_main = (30, 80, 80)
+            armor_dark = (20, 50, 50)
+            armor_light = (60, 140, 140)
+            accent = (0, 255, 255)
+        elif theme == "steampunk":
+            armor_main = (120, 80, 40)
+            armor_dark = (80, 50, 25)
+            armor_light = (180, 130, 80)
+            accent = (184, 115, 51)
+        elif theme == "fire":
+            armor_main = (150, 60, 30)
+            armor_dark = (100, 40, 20)
+            armor_light = (200, 100, 60)
+            accent = (255, 100, 30)
+        elif theme == "water":
+            armor_main = (50, 100, 150)
+            armor_dark = (30, 70, 110)
+            armor_light = (80, 140, 200)
+            accent = (50, 150, 255)
+        elif theme == "wind":
+            armor_main = (130, 180, 130)
+            armor_dark = (90, 140, 90)
+            armor_light = (180, 220, 180)
+            accent = (200, 255, 200)
+        elif theme == "earth":
+            armor_main = (100, 70, 50)
+            armor_dark = (70, 45, 30)
+            armor_light = (140, 100, 70)
+            accent = (139, 90, 43)
+        elif theme == "electric":
+            armor_main = (140, 140, 60)
+            armor_dark = (100, 100, 40)
+            armor_light = (180, 180, 100)
+            accent = (255, 255, 50)
+        else:
+            armor_main = main
+            armor_dark = dark
+            armor_light = light
+            accent = (180, 160, 140)
+
+        # Armor size scales with tier
+        shoulder_width = size // 3 + tier * 3
+        body_height = size // 2 + tier * 2
+
+        # Draw shoulders - spiky for demonic, winged for angelic
+        shoulder_y = size // 6
+        if theme == "demonic" and tier >= 2:
+            # Spiked pauldrons
+            pygame.draw.polygon(surf, armor_main, [
+                (cx - shoulder_width, shoulder_y + 10),
+                (cx - shoulder_width - 8 - tier * 2, shoulder_y - 5 - tier * 3),
+                (cx - shoulder_width // 2, shoulder_y),
+            ])
+            pygame.draw.polygon(surf, armor_main, [
+                (cx + shoulder_width, shoulder_y + 10),
+                (cx + shoulder_width + 8 + tier * 2, shoulder_y - 5 - tier * 3),
+                (cx + shoulder_width // 2, shoulder_y),
+            ])
+        elif theme == "angelic" and tier >= 2:
+            # Wing-shaped pauldrons
+            pygame.draw.ellipse(surf, armor_light, (cx - shoulder_width - 10, shoulder_y - 5, 20, 15))
+            pygame.draw.ellipse(surf, armor_light, (cx + shoulder_width - 10, shoulder_y - 5, 20, 15))
+
+        # Main pauldrons
+        pygame.draw.ellipse(surf, armor_main, (cx - shoulder_width, shoulder_y, shoulder_width // 2, size // 5))
+        pygame.draw.ellipse(surf, armor_main, (cx + shoulder_width // 2, shoulder_y, shoulder_width // 2, size // 5))
+        pygame.draw.ellipse(surf, armor_dark, (cx - shoulder_width, shoulder_y, shoulder_width // 2, size // 5), 2)
+        pygame.draw.ellipse(surf, armor_dark, (cx + shoulder_width // 2, shoulder_y, shoulder_width // 2, size // 5), 2)
+
+        # Body/chestplate
+        body_points = [
+            (cx - shoulder_width + 5, shoulder_y + size // 10),
+            (cx + shoulder_width - 5, shoulder_y + size // 10),
+            (cx + shoulder_width - 10, cy + size // 10),
+            (cx + size // 4, size - size // 5),
+            (cx, size - size // 6),
+            (cx - size // 4, size - size // 5),
+            (cx - shoulder_width + 10, cy + size // 10),
+        ]
+        pygame.draw.polygon(surf, armor_main, body_points)
+        pygame.draw.polygon(surf, armor_dark, body_points, 2)
+
+        # Center detail - varies by theme
+        if theme == "demonic":
+            # Skull emblem
+            skull_y = cy - 5
+            pygame.draw.circle(surf, (60, 50, 55), (cx, skull_y), 8 + tier)
+            pygame.draw.circle(surf, accent, (cx - 4, skull_y - 2), 2)
+            pygame.draw.circle(surf, accent, (cx + 4, skull_y - 2), 2)
+            pygame.draw.polygon(surf, accent, [(cx, skull_y + 2), (cx - 2, skull_y + 6), (cx + 2, skull_y + 6)])
+        elif theme == "angelic":
+            # Holy symbol / cross
+            pygame.draw.rect(surf, accent, (cx - 2, cy - 12, 4, 20))
+            pygame.draw.rect(surf, accent, (cx - 8, cy - 6, 16, 4))
+            pygame.draw.circle(surf, (255, 255, 255), (cx, cy - 8), 3)
+        elif theme == "chaotic":
+            # Swirling void
+            for i in range(3):
+                r = 6 + i * 3
+                pygame.draw.circle(surf, (100 + i * 30, 50 + i * 20, 150 + i * 20), (cx, cy - 3), r, 1)
+        else:
+            # Simple line detail
+            pygame.draw.line(surf, armor_light, (cx, shoulder_y + size // 8), (cx, size - size // 4), 2)
+
+        # Collar/neck guard
+        pygame.draw.ellipse(surf, armor_dark, (cx - size // 6, size // 8, size // 3, size // 8))
+
+        # Highlight on chest
+        pygame.draw.arc(surf, armor_light, (cx - size // 5, shoulder_y + size // 12, size // 2.5, size // 4), 0.5, 2.6, 2)
+
+        # Extra details for high tier
+        if tier >= 3:
+            # Belt/waist detail
+            pygame.draw.rect(surf, armor_dark, (cx - size // 4, cy + size // 8, size // 2, 6))
+            pygame.draw.circle(surf, accent, (cx, cy + size // 8 + 3), 4)
+
+    def _draw_enhanced_ring(self, surf: pygame.Surface, size: int,
+                            main: Tuple, dark: Tuple, light: Tuple,
+                            tier: int, theme: str, rarity: Rarity):
+        """Draw enhanced ring/jewelry with tier and theme effects."""
+        cx, cy = size // 2, size // 2
+
+        # Theme-based colors
+        if theme == "demonic":
+            band_color = (50, 30, 35)
+            gem_color = (200, 50, 50)
+            gem_glow = (255, 100, 80)
+        elif theme == "angelic":
+            band_color = (255, 240, 200)
+            gem_color = (255, 255, 220)
+            gem_glow = (255, 255, 150)
+        elif theme == "chaotic":
+            band_color = (100, 60, 140)
+            gem_color = (200, 100, 255)
+            gem_glow = (255, 150, 255)
+        elif theme == "magical":
+            band_color = (120, 100, 180)
+            gem_color = (148, 103, 255)
+            gem_glow = (200, 170, 255)
+        elif theme == "cyberpunk":
+            band_color = (40, 60, 60)
+            gem_color = (0, 255, 255)
+            gem_glow = (100, 255, 255)
+        elif theme == "steampunk":
+            band_color = (140, 100, 50)
+            gem_color = (184, 115, 51)
+            gem_glow = (220, 170, 100)
+        elif theme == "fire":
+            band_color = (120, 50, 20)
+            gem_color = (255, 100, 30)
+            gem_glow = (255, 150, 80)
+        elif theme == "water":
+            band_color = (40, 80, 120)
+            gem_color = (50, 150, 255)
+            gem_glow = (100, 200, 255)
+        elif theme == "wind":
+            band_color = (100, 150, 100)
+            gem_color = (200, 255, 200)
+            gem_glow = (220, 255, 220)
+        elif theme == "earth":
+            band_color = (80, 55, 35)
+            gem_color = (139, 90, 43)
+            gem_glow = (180, 140, 100)
+        elif theme == "electric":
+            band_color = (100, 100, 40)
+            gem_color = (255, 255, 50)
+            gem_glow = (255, 255, 150)
+        else:
+            band_color = main
+            gem_color = light
+            gem_glow = (255, 255, 255)
+
+        # Ring band - more ornate at higher tiers
+        band_width = size * 2 // 3 + tier * 2
+        band_height = size * 2 // 5 + tier
+
+        # Main band
+        pygame.draw.ellipse(surf, dark, (cx - band_width // 2, cy - band_height // 4, band_width, band_height))
+        pygame.draw.ellipse(surf, band_color, (cx - band_width // 2 + 2, cy - band_height // 4 + 2, band_width - 4, band_height - 4))
+        pygame.draw.ellipse(surf, PALETTE['panel_bg'], (cx - band_width // 3, cy - band_height // 8, band_width * 2 // 3, band_height // 2))
+
+        # Decorative band details for high tier
+        if tier >= 2:
+            # Side gems or decorations
+            pygame.draw.circle(surf, gem_glow, (cx - band_width // 3, cy), 3)
+            pygame.draw.circle(surf, gem_glow, (cx + band_width // 3, cy), 3)
+
+        # Main gem - size based on tier
+        gem_radius = size // 6 + tier * 2
+        gem_y = cy - band_height // 4 - gem_radius // 2
+
+        # Gem glow
+        for i in range(3):
+            glow_alpha = 60 - i * 20
+            pygame.draw.circle(surf, (*gem_glow[:3], glow_alpha), (cx, gem_y), gem_radius + 4 - i * 2)
+
+        # Gem shape varies by theme
+        if theme == "demonic":
+            # Evil eye gem
+            pygame.draw.ellipse(surf, gem_color, (cx - gem_radius, gem_y - gem_radius // 2, gem_radius * 2, gem_radius))
+            pygame.draw.ellipse(surf, (40, 20, 20), (cx - gem_radius // 3, gem_y - gem_radius // 4, gem_radius * 2 // 3, gem_radius // 2))
+            pygame.draw.circle(surf, (255, 50, 50), (cx, gem_y), 2)
+        elif theme == "angelic":
+            # Brilliant cut diamond
+            points = []
+            for i in range(8):
+                angle = i * math.pi / 4 - math.pi / 8
+                r = gem_radius if i % 2 == 0 else gem_radius * 0.7
+                points.append((cx + int(math.cos(angle) * r), gem_y + int(math.sin(angle) * r)))
+            pygame.draw.polygon(surf, gem_color, points)
+            pygame.draw.polygon(surf, (255, 255, 255), points, 1)
+            # Inner sparkle
+            pygame.draw.circle(surf, (255, 255, 255), (cx - 2, gem_y - 2), gem_radius // 3)
+        elif theme == "chaotic":
+            # Void gem
+            pygame.draw.circle(surf, (30, 10, 40), (cx, gem_y), gem_radius)
+            pygame.draw.circle(surf, gem_color, (cx, gem_y), gem_radius, 2)
+            # Swirling energy
+            for i in range(3):
+                angle = i * math.pi * 2 / 3
+                ex = cx + int(math.cos(angle) * gem_radius // 2)
+                ey = gem_y + int(math.sin(angle) * gem_radius // 2)
+                pygame.draw.circle(surf, gem_glow, (ex, ey), 2)
+        else:
+            # Standard gem
+            pygame.draw.circle(surf, gem_color, (cx, gem_y), gem_radius)
+            pygame.draw.circle(surf, dark, (cx, gem_y), gem_radius, 1)
+            # Highlight
+            pygame.draw.circle(surf, (255, 255, 255), (cx - gem_radius // 3, gem_y - gem_radius // 3), gem_radius // 3)
+
+        # Prongs holding gem
+        if tier >= 2:
+            pygame.draw.line(surf, band_color, (cx - gem_radius + 2, gem_y + gem_radius // 2), (cx - gem_radius + 2, gem_y), 2)
+            pygame.draw.line(surf, band_color, (cx + gem_radius - 2, gem_y + gem_radius // 2), (cx + gem_radius - 2, gem_y), 2)
+
+    def _draw_enhanced_potion(self, surf: pygame.Surface, size: int,
+                              main: Tuple, dark: Tuple, light: Tuple,
+                              tier: int, theme: str, rarity: Rarity):
+        """Draw enhanced potion with tier and theme effects."""
+        cx, cy = size // 2, size // 2
+
+        # Theme-based liquid colors
+        if theme == "demonic":
+            liquid = (150, 30, 50)
+            liquid_light = (200, 80, 100)
+            bottle_tint = (60, 40, 50)
+        elif theme == "angelic":
+            liquid = (255, 240, 180)
+            liquid_light = (255, 255, 220)
+            bottle_tint = (240, 230, 210)
+        elif theme == "chaotic":
+            liquid = (150, 80, 200)
+            liquid_light = (200, 150, 255)
+            bottle_tint = (100, 80, 120)
+        elif theme == "magical":
+            liquid = (80, 150, 220)
+            liquid_light = (150, 200, 255)
+            bottle_tint = (100, 120, 150)
+        else:
+            liquid = main
+            liquid_light = light
+            bottle_tint = (200, 200, 210)
+
+        # Bottle size scales with tier
+        bottle_width = size // 2 + tier * 2
+        bottle_height = size // 2 + tier * 2
+        bottle_y = cy
+
+        # Bottle body
+        pygame.draw.ellipse(surf, bottle_tint, (cx - bottle_width // 2, bottle_y, bottle_width, bottle_height - 4))
+        pygame.draw.ellipse(surf, dark, (cx - bottle_width // 2, bottle_y, bottle_width, bottle_height - 4), 2)
+
+        # Liquid fill
+        liquid_rect = (cx - bottle_width // 2 + 4, bottle_y + 8, bottle_width - 8, bottle_height - 16)
+        pygame.draw.ellipse(surf, liquid, liquid_rect)
+
+        # Liquid bubbles
+        for i in range(tier + 1):
+            bx = cx - bottle_width // 4 + i * (bottle_width // 3)
+            by = bottle_y + bottle_height // 3 + (i % 2) * 8
+            pygame.draw.circle(surf, liquid_light, (bx, by), 3)
+
+        # Liquid shine
+        pygame.draw.ellipse(surf, liquid_light, (cx - bottle_width // 4, bottle_y + 10, bottle_width // 3, bottle_height // 4))
+
+        # Bottle neck
+        neck_width = size // 5
+        neck_height = size // 4
+        pygame.draw.rect(surf, bottle_tint, (cx - neck_width // 2, bottle_y - neck_height + 5, neck_width, neck_height))
+        pygame.draw.rect(surf, dark, (cx - neck_width // 2, bottle_y - neck_height + 5, neck_width, neck_height), 1)
+
+        # Cork
+        cork_color = (120, 80, 50) if theme != "demonic" else (60, 40, 30)
+        pygame.draw.rect(surf, cork_color, (cx - neck_width // 2 - 2, bottle_y - neck_height - 2, neck_width + 4, size // 8))
+
+        # Theme-specific effects
+        if theme == "demonic":
+            # Smoke wisps
+            for i in range(3):
+                sy = bottle_y - neck_height - 8 - i * 6
+                sx = cx + int(math.sin(i * 1.5) * 5)
+                pygame.draw.circle(surf, (80, 40, 60, 100), (sx, sy), 4 - i)
+            # Skull on bottle
+            if tier >= 2:
+                pygame.draw.circle(surf, (80, 60, 70), (cx, bottle_y + bottle_height // 3), 6)
+                pygame.draw.circle(surf, (40, 20, 30), (cx - 2, bottle_y + bottle_height // 3 - 1), 1)
+                pygame.draw.circle(surf, (40, 20, 30), (cx + 2, bottle_y + bottle_height // 3 - 1), 1)
+
+        elif theme == "angelic":
+            # Sparkles around bottle
+            for i in range(4):
+                angle = i * math.pi / 2 + math.pi / 4
+                sx = cx + int(math.cos(angle) * (bottle_width // 2 + 5))
+                sy = bottle_y + bottle_height // 3 + int(math.sin(angle) * 10)
+                self._draw_sparkle(surf, sx, sy, 4)
+            # Halo above cork
+            if tier >= 2:
+                pygame.draw.ellipse(surf, (255, 240, 150), (cx - 8, bottle_y - neck_height - 12, 16, 6), 1)
+
+        elif theme == "chaotic":
+            # Reality distortion
+            for i in range(3):
+                pygame.draw.circle(surf, (150, 100, 200, 50), (cx + (i - 1) * 8, bottle_y + bottle_height // 2), bottle_width // 4 - i * 3, 1)
+
+        # Label for high tier
+        if tier >= 3:
+            label_color = main if theme == "normal" else (200, 180, 150)
+            pygame.draw.rect(surf, label_color, (cx - bottle_width // 3, bottle_y + bottle_height // 2 - 4, bottle_width * 2 // 3, 10))
+            pygame.draw.rect(surf, dark, (cx - bottle_width // 3, bottle_y + bottle_height // 2 - 4, bottle_width * 2 // 3, 10), 1)
+
+    def _draw_sparkle(self, surf: pygame.Surface, x: int, y: int, size: int):
+        """Draw a sparkle/star effect."""
+        pygame.draw.line(surf, (255, 255, 255), (x - size, y), (x + size, y), 1)
+        pygame.draw.line(surf, (255, 255, 255), (x, y - size), (x, y + size), 1)
+        pygame.draw.line(surf, (255, 255, 200), (x - size // 2, y - size // 2), (x + size // 2, y + size // 2), 1)
+        pygame.draw.line(surf, (255, 255, 200), (x + size // 2, y - size // 2), (x - size // 2, y + size // 2), 1)
 
     def _draw_sword(self, surf: pygame.Surface, size: int,
                     main: Tuple, dark: Tuple, light: Tuple):

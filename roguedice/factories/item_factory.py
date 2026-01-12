@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 
 from ..core.world import World
 from ..components.item import ItemComponent
-from ..models.enums import ItemType, Rarity
+from ..models.enums import ItemType, Rarity, ItemTheme, Element
 from ..utils.probability import roll_rarity, calculate_item_level, scale_stat
 
 
@@ -147,7 +147,74 @@ class ItemFactory:
             if template.get("special_effect"):
                 item.special_effects.append(template["special_effect"])
 
+        # Roll and apply theme
+        self._apply_theme(item, rarity, level)
+
         return item
+
+    def _roll_theme(self, rarity: Rarity) -> ItemTheme:
+        """Roll for a theme based on rarity chance."""
+        # Theme chances by rarity
+        theme_chances = {
+            Rarity.COMMON: 0.0,
+            Rarity.UNCOMMON: 0.10,
+            Rarity.RARE: 0.30,
+            Rarity.EPIC: 0.55,
+            Rarity.LEGENDARY: 0.80,
+            Rarity.MYTHICAL: 1.0,
+        }
+
+        if random.random() >= theme_chances.get(rarity, 0.0):
+            return ItemTheme.NONE
+
+        # Equal weight for all themes
+        themes = [
+            ItemTheme.CYBERPUNK,
+            ItemTheme.STEAMPUNK,
+            ItemTheme.MAGICAL,
+            ItemTheme.ELEMENTAL,
+            ItemTheme.ANGELIC,
+            ItemTheme.DEMONIC,
+        ]
+        return random.choice(themes)
+
+    def _roll_element(self) -> Element:
+        """Roll a random element for ELEMENTAL theme."""
+        elements = [
+            Element.FIRE,
+            Element.WATER,
+            Element.WIND,
+            Element.EARTH,
+            Element.ELECTRIC,
+        ]
+        return random.choice(elements)
+
+    def _apply_theme(self, item: ItemComponent, rarity: Rarity, level: int) -> None:
+        """Apply theme and theme-specific stat bonuses."""
+        item.theme = self._roll_theme(rarity)
+
+        if item.theme == ItemTheme.NONE:
+            return
+
+        if item.theme == ItemTheme.ELEMENTAL:
+            item.element = self._roll_element()
+
+        # Theme stat bonuses scale with rarity and level
+        rarity_factor = rarity.multiplier
+        level_factor = 1 + (level - 1) * 0.15
+
+        # Steampunk: +crit chance (3-12%)
+        if item.theme == ItemTheme.STEAMPUNK:
+            item.crit_chance_bonus += 0.03 * rarity_factor * level_factor
+
+        # Elemental-specific stat bonuses
+        if item.theme == ItemTheme.ELEMENTAL:
+            if item.element == Element.WIND:
+                # Wind: +attack speed (10-40%)
+                item.attack_speed_bonus += 0.10 * rarity_factor * level_factor
+            elif item.element == Element.EARTH:
+                # Earth: +damage (damage reduction handled in combat)
+                item.damage_bonus += 5 * rarity_factor * level_factor
 
     def _create_basic_item(
         self,
@@ -180,6 +247,9 @@ class ItemFactory:
             item.hp_bonus = int(15 * mult)
         else:
             item.crit_chance_bonus = 0.02 * mult
+
+        # Roll and apply theme
+        self._apply_theme(item, rarity, level)
 
         self.world.add_component(entity_id, item)
         return entity_id

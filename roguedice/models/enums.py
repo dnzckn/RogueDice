@@ -74,3 +74,78 @@ class StatType(Enum):
     DEFENSE = auto()
     RESISTANCE = auto()
     DODGE_CHANCE = auto()
+
+
+class ItemTheme(Enum):
+    """Item themes that provide special combat effects and visuals."""
+    NONE = auto()
+    CYBERPUNK = auto()   # +gold on kill
+    STEAMPUNK = auto()   # +crit chance
+    MAGICAL = auto()     # Mana burst (bonus magic damage)
+    ELEMENTAL = auto()   # Element-based effects
+    ANGELIC = auto()     # Heal on attack
+    DEMONIC = auto()     # Spend HP for more damage
+
+    @property
+    def color(self) -> tuple:
+        """Primary RGB color for this theme."""
+        colors = {
+            ItemTheme.NONE: (180, 180, 180),
+            ItemTheme.CYBERPUNK: (0, 255, 255),      # Cyan/Neon
+            ItemTheme.STEAMPUNK: (184, 115, 51),     # Copper/Brass
+            ItemTheme.MAGICAL: (148, 103, 255),      # Purple/Arcane
+            ItemTheme.ELEMENTAL: (100, 200, 100),    # Green (varies by element)
+            ItemTheme.ANGELIC: (255, 215, 100),      # Golden/Holy
+            ItemTheme.DEMONIC: (180, 30, 60),        # Dark red
+        }
+        return colors.get(self, (180, 180, 180))
+
+    @property
+    def display_name(self) -> str:
+        """Human-readable theme name."""
+        names = {
+            ItemTheme.NONE: "",
+            ItemTheme.CYBERPUNK: "Cyberpunk",
+            ItemTheme.STEAMPUNK: "Steampunk",
+            ItemTheme.MAGICAL: "Magical",
+            ItemTheme.ELEMENTAL: "Elemental",
+            ItemTheme.ANGELIC: "Angelic",
+            ItemTheme.DEMONIC: "Demonic",
+        }
+        return names.get(self, "")
+
+
+class Element(Enum):
+    """Elements for Elemental-themed items."""
+    NONE = auto()
+    FIRE = auto()      # DoT burn damage
+    WATER = auto()     # Flinch (enemy skips attack)
+    WIND = auto()      # Attack speed bonus
+    EARTH = auto()     # More damage, less speed
+    ELECTRIC = auto()  # Paralyze (enemy can't attack)
+
+    @property
+    def color(self) -> tuple:
+        """RGB color for this element."""
+        colors = {
+            Element.NONE: (180, 180, 180),
+            Element.FIRE: (255, 100, 30),       # Orange-red
+            Element.WATER: (50, 150, 255),      # Blue
+            Element.WIND: (200, 255, 200),      # Light green
+            Element.EARTH: (139, 90, 43),       # Brown
+            Element.ELECTRIC: (255, 255, 50),   # Yellow
+        }
+        return colors.get(self, (180, 180, 180))
+
+    @property
+    def display_name(self) -> str:
+        """Human-readable element name."""
+        names = {
+            Element.NONE: "",
+            Element.FIRE: "Fire",
+            Element.WATER: "Water",
+            Element.WIND: "Wind",
+            Element.EARTH: "Earth",
+            Element.ELECTRIC: "Electric",
+        }
+        return names.get(self, "")

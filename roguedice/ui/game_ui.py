@@ -5,12 +5,12 @@ import sys
 import math
 import random
 from typing import Optional, List, Tuple, Dict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ..services.game_service import GameService, TurnResult
 from ..components.board_square import BoardSquareComponent
 from ..components.item import ItemComponent
-from ..models.enums import SquareType, Rarity, ItemType
+from ..models.enums import SquareType, Rarity, ItemType, ItemTheme, Element
 from ..models.persistent_data import UPGRADES
 from ..models.characters import CHARACTERS, get_character
 from .sprites import sprites, PALETTE, RARITY_SCHEMES
@@ -53,6 +53,195 @@ class PlayerMovement:
     hop_height: float = 0.0  # Current hop height for bounce effect
 
 
+@dataclass
+class TimingMinigame:
+    """Timing bar minigame state - HARD MODE."""
+    active: bool = False
+    bar_position: float = 0.0  # 0.0 to 1.0, position of the moving indicator
+    bar_speed: float = 3.0  # FASTER - was 1.5
+    bar_direction: int = 1  # 1 = right, -1 = left
+    sweet_spot_start: float = 0.42  # Smaller sweet spot
+    sweet_spot_end: float = 0.52  # Only 10% of bar (was 20%)
+    grace_period: float = 1.5  # Time before bar starts moving
+    result: Optional[str] = None  # "win", "lose", None
+    result_timer: float = 0.0  # Time to show result
+    reward_item_id: Optional[int] = None
+
+
+@dataclass
+class RouletteMinigame:
+    """Roulette wheel minigame state."""
+    active: bool = False
+    wheel_angle: float = 0.0  # Current rotation in radians
+    wheel_speed: float = 12.0  # Angular velocity
+    is_spinning: bool = False
+    stopped: bool = False
+    grace_period: float = 1.5  # Time before player can spin
+    result: Optional[str] = None  # "win", "lose", None
+    result_timer: float = 0.0
+    reward_item_id: Optional[int] = None
+    selected_segment: int = -1
+    reward_type: str = ""  # What reward was won
+
+
+@dataclass
+class ClawMinigame:
+    """Claw machine minigame state."""
+    active: bool = False
+    claw_x: float = 225.0  # Horizontal position
+    claw_y: float = 60.0  # Vertical position (top)
+    claw_state: str = "moving"  # "moving", "dropping", "grabbing", "rising", "done"
+    attempts_left: int = 2
+    held_item: Optional[str] = None  # What item claw grabbed
+    items: List = field(default_factory=list)  # (x, y, type, is_rock)
+    grace_period: float = 1.5  # Time before player can move claw
+    result: Optional[str] = None
+    result_timer: float = 0.0
+    reward_item_id: Optional[int] = None
+
+
+@dataclass
+class FlappyMinigame:
+    """Flappy bird style minigame state."""
+    active: bool = False
+    bird_y: float = 175.0  # Bird vertical position
+    bird_velocity: float = 0.0
+    obstacles: List = field(default_factory=list)  # (x, gap_y, gap_height)
+    coins: List = field(default_factory=list)  # (x, y, collected)
+    coins_collected: int = 0
+    coins_needed: int = 5
+    game_timer: float = 0.0
+    time_limit: float = 10.0
+    grace_period: float = 1.0  # 1 second before bird starts falling
+    result: Optional[str] = None
+    result_timer: float = 0.0
+    reward_item_id: Optional[int] = None
+
+
+@dataclass
+class ArcheryMinigame:
+    """Archery target shooting minigame state."""
+    active: bool = False
+    # Bow and aim
+    bow_y: float = 175.0  # Vertical position of bow (center of panel)
+    aim_angle: float = 0.0  # Angle in degrees (-30 to +30)
+    # Power meter
+    power: float = 0.0  # 0.0 to 1.0
+    charging: bool = False  # Is player holding space
+    # Arrow state
+    arrow_flying: bool = False
+    arrow_x: float = 0.0
+    arrow_y: float = 0.0
+    arrow_vx: float = 0.0
+    arrow_vy: float = 0.0
+    # Target
+    target_x: float = 380.0  # Fixed X position
+    target_y: float = 175.0  # Vertical position (can move)
+    target_moving: bool = False
+    target_direction: int = 1  # 1 = down, -1 = up
+    target_speed: float = 60.0
+    # Wind
+    wind_strength: float = 0.0  # Negative = left, positive = right (affects Y in this case)
+    # Scoring
+    shots_taken: int = 0
+    shots_allowed: int = 5
+    bullseyes: int = 0
+    bullseyes_needed: int = 2
+    score: int = 0  # Total points
+    # Timing
+    grace_period: float = 1.5  # Time before game starts
+    last_hit_text: str = ""  # "BULLSEYE!", "GOOD!", "MISS!"
+    last_hit_timer: float = 0.0
+    # Result
+    result: Optional[str] = None
+    result_timer: float = 0.0
+    reward_item_id: Optional[int] = None
+
+
+@dataclass
+class BlacksmithMinigame:
+    """Blacksmith gamble minigame - risk upgrading an item's rarity."""
+    active: bool = False
+    # Item being upgraded
+    item_id: Optional[int] = None
+    current_rarity: int = 0  # 0=Common, 1=Uncommon, 2=Rare, 3=Epic, 4=Legendary
+    rarity_names: List[str] = field(default_factory=lambda: ["Common", "Uncommon", "Rare", "Epic", "Legendary"])
+    # Upgrade state
+    upgrade_level: int = 0  # 0, 1, 2 (number of successful upgrades)
+    success_chances: List[float] = field(default_factory=lambda: [0.80, 0.50, 0.10])  # 80%, 50%, 10%
+    # Animation state
+    is_rolling: bool = False  # Currently showing upgrade animation
+    roll_timer: float = 0.0  # Animation timer
+    roll_duration: float = 1.5  # How long the suspense animation lasts
+    roll_result: Optional[bool] = None  # True=success, False=fail, None=not rolled yet
+    sparks_timer: float = 0.0  # For spark animation
+    # Player choice
+    player_chose: bool = False  # Has player made a choice this round
+    item_broken: bool = False  # Item was destroyed
+    # Grace period
+    grace_period: float = 1.0
+    # Result
+    result: Optional[str] = None  # "win" (kept item) or "lose" (item broke)
+    result_timer: float = 0.0
+    reward_item_id: Optional[int] = None
+
+
+@dataclass
+class MonsterMinigame:
+    """Monster attack minigame - press arrow sequences to survive!
+
+    Spawns after curse squares. Fail = 30% HP damage, Pass = 10% heal + item chance.
+    5 rounds, 10 seconds each. Arrow counts: R1=4, R2=8, R3=16, R4=20, R5=25
+    """
+    active: bool = False
+    # Round progression
+    current_round: int = 1  # 1-5
+    max_rounds: int = 5
+    arrows_per_round: List[int] = field(default_factory=lambda: [4, 8, 16, 20, 25])
+    # Current sequence
+    sequence: List[str] = field(default_factory=list)  # ["up", "down", "left", "right"]
+    player_index: int = 0  # Current position in sequence player needs to hit
+    # Timing
+    round_timer: float = 10.0  # 10 seconds per round
+    round_time_limit: float = 10.0
+    grace_period: float = 2.0  # Brief "GET READY" before input starts
+    # Display state (no longer used but kept for compatibility)
+    showing_sequence: bool = False  # Always False - no memorization phase
+    sequence_show_index: int = 0  # Unused
+    sequence_show_timer: float = 0.0  # Unused
+    # Feedback
+    last_input_correct: Optional[bool] = None  # True/False/None for feedback flash
+    input_flash_timer: float = 0.0
+    # Monster theming
+    monster_name: str = "Shadow Beast"
+    attack_name: str = "Dark Pulse"
+    # Result
+    result: Optional[str] = None  # "win", "lose"
+    result_timer: float = 0.0
+    reward_item_id: Optional[int] = None
+
+
+@dataclass
+class BossCinematic:
+    """Epic boss introduction cinematic state."""
+    active: bool = False
+    phase: str = "none"  # "awaken", "speech", "exit", "transition", "entrance"
+    timer: float = 0.0
+    # Dragon position for exit animation (normalized 0-1, then offscreen)
+    dragon_x: float = 0.5  # Center
+    dragon_y: float = 0.5
+    # Speech bubble
+    speech_text: str = ""
+    speech_index: int = 0
+    # Screen effects
+    screen_flash: float = 0.0
+    screen_shake: float = 0.0
+    # Battle data to pass along
+    pending_battle_result: Optional[object] = None
+    # Dragon scale for dramatic effect
+    dragon_scale: float = 1.0
+
+
 class GameUI:
     """Main game UI using pygame with polished pixel art and battle scenes."""
 
@@ -92,13 +281,27 @@ class GameUI:
         self.item_slots: List[ItemSlot] = []
         self.mouse_pos = (0, 0)
         self.hovered_slot: Optional[ItemSlot] = None
+        self.blessing_rects: List[Tuple[pygame.Rect, 'Blessing']] = []  # For tooltip hover
+        self.hovered_blessing: Optional['Blessing'] = None
 
         # Animations
         self.dice_anim = DiceAnimation()
         self.player_movement = PlayerMovement()
         self.particle_effects: List[Dict] = []
+        self.floating_texts: List[Dict] = []  # Floating text animations
         self.screen_shake = 0.0
         self.transition_alpha = 0
+
+        # Minigame state
+        self.timing_game = TimingMinigame()
+        self.roulette_game = RouletteMinigame()
+        self.claw_game = ClawMinigame()
+        self.flappy_game = FlappyMinigame()
+        self.archery_game = ArcheryMinigame()
+        self.blacksmith_game = BlacksmithMinigame()
+        self.monster_game = MonsterMinigame()  # Arrow sequence survival minigame
+        self.minigame_corner: int = 0  # Which corner triggered current minigame
+        self.pending_corner_function: bool = False  # Process corner after item choice
 
         # Dragon speech bubble
         self.dragon_last_chains = 8
@@ -113,6 +316,19 @@ class GameUI:
             "The chains weaken...",
             "Foolish adventurer!",
             "I will burn everything!",
+        ]
+
+        # Boss cinematic for epic final battle intro
+        self.boss_cinematic = BossCinematic()
+        self.BOSS_ENTRANCE_QUOTES = [
+            "Finally FREE! Time to stretch these wings...",
+            "Did you really think those chains could hold ME?",
+            "Oh, you're still here? How... unfortunate.",
+            "I've been doing pilates for 1000 years. Prepare yourself!",
+            "*cracks neck* Ahh, that's better. Now, where were we?",
+            "You know what's worse than being chained? YOUR FACE!",
+            "I hope you brought marshmallows... for YOUR FUNERAL!",
+            "Plot twist: I was the final boss the WHOLE time!",
         ]
 
         # Battle scene
@@ -166,6 +382,638 @@ class GameUI:
             self._handle_victory_keys(event)
         elif self.state == "settings":
             self._handle_settings_keys(event)
+        elif self.state == "minigame":
+            self._handle_minigame_keys(event)
+
+    def _handle_minigame_keys(self, event: pygame.event.Event) -> None:
+        """Handle keys during minigame."""
+        # TIMING MINIGAME
+        if self.timing_game.active:
+            if not self.timing_game.result:
+                if self.timing_game.grace_period > 0:
+                    # Skip grace period with space
+                    if event.key == pygame.K_SPACE:
+                        self.timing_game.grace_period = 0
+                elif event.key == pygame.K_SPACE:
+                    pos = self.timing_game.bar_position
+                    if self.timing_game.sweet_spot_start <= pos <= self.timing_game.sweet_spot_end:
+                        self.timing_game.result = "win"
+                        self._add_particles(self.WINDOW_WIDTH - 245, 300, PALETTE['gold'], 30)
+                        self._generate_minigame_reward(self.timing_game)
+                    else:
+                        self.timing_game.result = "lose"
+                        self.screen_shake = 0.3
+                    self.timing_game.result_timer = 2.0
+            elif self.timing_game.result_timer <= 0:
+                self._finish_minigame(self.timing_game)
+            return
+
+        # ROULETTE MINIGAME
+        if self.roulette_game.active:
+            if not self.roulette_game.result:
+                if self.roulette_game.grace_period > 0:
+                    # Skip grace period with space
+                    if event.key == pygame.K_SPACE:
+                        self.roulette_game.grace_period = 0
+                elif event.key == pygame.K_SPACE and not self.roulette_game.is_spinning:
+                    self.roulette_game.is_spinning = True
+            elif self.roulette_game.result_timer <= 0:
+                self._finish_minigame(self.roulette_game)
+            return
+
+        # CLAW MINIGAME
+        if self.claw_game.active:
+            if not self.claw_game.result:
+                if self.claw_game.grace_period > 0:
+                    # Skip grace period with space
+                    if event.key == pygame.K_SPACE:
+                        self.claw_game.grace_period = 0
+                elif self.claw_game.claw_state == "moving":
+                    if event.key == pygame.K_LEFT:
+                        self.claw_game.claw_x = max(70, self.claw_game.claw_x - 20)
+                    elif event.key == pygame.K_RIGHT:
+                        self.claw_game.claw_x = min(350, self.claw_game.claw_x + 20)
+                    elif event.key == pygame.K_SPACE:
+                        self.claw_game.claw_state = "dropping"
+            elif self.claw_game.result_timer <= 0:
+                self._finish_minigame(self.claw_game)
+            return
+
+        # FLAPPY MINIGAME
+        if self.flappy_game.active:
+            if not self.flappy_game.result:
+                if event.key == pygame.K_SPACE:
+                    # End grace period on first jump
+                    self.flappy_game.grace_period = 0
+                    self.flappy_game.bird_velocity = -280  # Jump!
+            elif self.flappy_game.result_timer <= 0:
+                self._finish_minigame(self.flappy_game)
+            return
+
+        # ARCHERY MINIGAME
+        if self.archery_game.active:
+            if not self.archery_game.result:
+                if self.archery_game.grace_period <= 0 and not self.archery_game.arrow_flying:
+                    # Aim controls
+                    if event.key in (pygame.K_UP, pygame.K_w):
+                        self.archery_game.aim_angle = max(-30, self.archery_game.aim_angle - 5)
+                    elif event.key in (pygame.K_DOWN, pygame.K_s):
+                        self.archery_game.aim_angle = min(30, self.archery_game.aim_angle + 5)
+                    # Shoot
+                    elif event.key == pygame.K_SPACE:
+                        self._archery_shoot()
+                elif event.key == pygame.K_SPACE and self.archery_game.grace_period > 0:
+                    # Skip grace period
+                    self.archery_game.grace_period = 0
+            elif self.archery_game.result_timer <= 0:
+                self._finish_minigame(self.archery_game)
+            return
+
+        # BLACKSMITH MINIGAME
+        if self.blacksmith_game.active:
+            if not self.blacksmith_game.result:
+                if self.blacksmith_game.grace_period <= 0 and not self.blacksmith_game.is_rolling:
+                    # SPACE or UP = Upgrade (gamble)
+                    if event.key in (pygame.K_SPACE, pygame.K_UP, pygame.K_w):
+                        self._blacksmith_upgrade()
+                    # DOWN or ESCAPE = Keep item and leave
+                    elif event.key in (pygame.K_DOWN, pygame.K_s, pygame.K_ESCAPE):
+                        self._blacksmith_keep()
+                elif event.key == pygame.K_SPACE and self.blacksmith_game.grace_period > 0:
+                    self.blacksmith_game.grace_period = 0
+            elif self.blacksmith_game.result_timer <= 0:
+                self._finish_minigame(self.blacksmith_game)
+            return
+
+        # MONSTER MINIGAME - Arrow sequence survival
+        if self.monster_game.active:
+            if not self.monster_game.result:
+                if self.monster_game.grace_period <= 0:
+                    # Only accept arrow keys during input phase
+                    arrow_map = {
+                        pygame.K_UP: "up", pygame.K_w: "up",
+                        pygame.K_DOWN: "down", pygame.K_s: "down",
+                        pygame.K_LEFT: "left", pygame.K_a: "left",
+                        pygame.K_RIGHT: "right", pygame.K_d: "right",
+                    }
+                    if event.key in arrow_map:
+                        pressed = arrow_map[event.key]
+                        expected = self.monster_game.sequence[self.monster_game.player_index]
+
+                        if pressed == expected:
+                            # Correct input!
+                            self.monster_game.last_input_correct = True
+                            self.monster_game.input_flash_timer = 0.15
+                            self.monster_game.player_index += 1
+
+                            # Check if round complete
+                            if self.monster_game.player_index >= len(self.monster_game.sequence):
+                                self._monster_round_complete()
+                        else:
+                            # Wrong input - FAIL!
+                            self.monster_game.last_input_correct = False
+                            self.monster_game.input_flash_timer = 0.3
+                            self.monster_game.result = "lose"
+                            self.monster_game.result_timer = 2.5
+                            self.screen_shake = 0.4
+                            self._add_particles(self.WINDOW_WIDTH - 245, 200, PALETTE['red'], 30)
+            elif self.monster_game.result_timer <= 0:
+                self._finish_monster_minigame()
+            return
+
+    def _monster_round_complete(self) -> None:
+        """Handle completion of a monster minigame round."""
+        game = self.monster_game
+
+        if game.current_round >= game.max_rounds:
+            # All rounds complete - WIN!
+            game.result = "win"
+            game.result_timer = 2.5
+            self._add_particles(self.WINDOW_WIDTH - 245, 200, PALETTE['gold'], 40)
+            self._add_floating_text("SURVIVED!", self.WINDOW_WIDTH - 200, 250, PALETTE['gold'], 1.5)
+        else:
+            # Advance to next round
+            game.current_round += 1
+            game.sequence = self._generate_monster_round_sequence(game.current_round)
+            game.player_index = 0
+            game.round_timer = game.round_time_limit
+            game.showing_sequence = False  # No memorization phase - start input immediately
+            game.grace_period = 1.0  # Brief pause between rounds
+            self._add_floating_text(f"Round {game.current_round}!", self.WINDOW_WIDTH - 200, 150, PALETTE['cyan'], 1.0)
+
+    def _blacksmith_upgrade(self) -> None:
+        """Attempt to upgrade the item in blacksmith minigame."""
+        import random
+        game = self.blacksmith_game
+
+        if game.is_rolling or game.upgrade_level >= 3:
+            return
+
+        # Start the roll animation
+        game.is_rolling = True
+        game.roll_timer = 0.0
+
+        # Determine success
+        chance = game.success_chances[game.upgrade_level]
+        game.roll_result = random.random() < chance
+
+    def _blacksmith_keep(self) -> None:
+        """Keep the current item and end the minigame."""
+        game = self.blacksmith_game
+
+        if game.is_rolling:
+            return
+
+        # Player wins with current item
+        game.result = "win"
+        game.reward_item_id = game.item_id
+        game.result_timer = 2.0
+        self._add_particles(self.WINDOW_WIDTH - 245, 200, PALETTE['gold'], 20)
+
+    def _archery_shoot(self) -> None:
+        """Fire an arrow in the archery minigame."""
+        import math
+        game = self.archery_game
+        if game.arrow_flying or game.shots_taken >= game.shots_allowed:
+            return
+
+        # Calculate arrow velocity based on power and angle
+        power = game.power
+        speed = 200 + power * 300  # 200-500 pixels per second
+        angle_rad = math.radians(game.aim_angle)
+
+        game.arrow_flying = True
+        game.arrow_x = 70.0
+        game.arrow_y = game.bow_y
+        game.arrow_vx = speed * math.cos(angle_rad)
+        game.arrow_vy = speed * math.sin(angle_rad)
+        game.shots_taken += 1
+
+    def _generate_minigame_reward(self, minigame) -> None:
+        """Generate item reward for winning a minigame."""
+        from ..models.enums import Rarity
+        player = self.game.get_player_data()
+        round_num = player.current_round if player else 1
+        # Use item_factory directly to force rare rarity
+        minigame.reward_item_id = self.game.item_factory.create_item(
+            round_num + 3,  # Slightly better tier
+            rarity=Rarity.RARE
+        )
+
+    def _generate_roulette_reward(self, minigame) -> None:
+        """Generate reward for roulette based on reward_type."""
+        from ..models.enums import Rarity
+        player = self.game.get_player_data()
+        round_num = player.current_round if player else 1
+
+        reward_type = minigame.reward_type
+        if reward_type == "epic":
+            # Epic item!
+            minigame.reward_item_id = self.game.item_factory.create_item(
+                round_num + 5,
+                rarity=Rarity.EPIC
+            )
+        elif reward_type == "rare":
+            # Rare item
+            minigame.reward_item_id = self.game.item_factory.create_item(
+                round_num + 3,
+                rarity=Rarity.RARE
+            )
+        elif reward_type == "gold":
+            # Gold reward - give player gold instead of item
+            if player:
+                gold_amount = 50 + round_num * 20
+                player.gold += gold_amount
+                self._add_floating_text(f"+{gold_amount} Gold!", self.WINDOW_WIDTH - 200, 200, PALETTE['gold'], 1.5)
+            minigame.reward_item_id = None
+        elif reward_type == "blessing":
+            # Blessing - heal player and give small stat buff
+            if player:
+                heal_amount = int(player.max_hp * 0.25)
+                player.hp = min(player.hp + heal_amount, player.max_hp)
+                self._add_floating_text(f"+{heal_amount} HP!", self.WINDOW_WIDTH - 200, 200, PALETTE['green'], 1.5)
+            minigame.reward_item_id = None
+
+    def _finish_minigame(self, minigame) -> None:
+        """Finish a minigame and process corner function."""
+        won = minigame.result == "win"
+        reward_id = minigame.reward_item_id if won else None
+
+        # Reset the minigame
+        if isinstance(minigame, TimingMinigame):
+            self.timing_game = TimingMinigame()
+        elif isinstance(minigame, RouletteMinigame):
+            self.roulette_game = RouletteMinigame()
+        elif isinstance(minigame, ClawMinigame):
+            self.claw_game = ClawMinigame()
+        elif isinstance(minigame, FlappyMinigame):
+            self.flappy_game = FlappyMinigame()
+        elif isinstance(minigame, ArcheryMinigame):
+            self.archery_game = ArcheryMinigame()
+        elif isinstance(minigame, BlacksmithMinigame):
+            self.blacksmith_game = BlacksmithMinigame()
+
+        if won and reward_id:
+            # Show item choice first, then process corner
+            self.pending_item_id = reward_id
+            self.pending_corner_function = True  # Flag to process corner after item choice
+            self.state = "item_choice"
+        else:
+            # No reward, go straight to corner function
+            self._process_corner_after_minigame()
+
+    def _process_corner_after_minigame(self) -> None:
+        """Process the corner's normal function after minigame."""
+        result = self.game.process_corner_function(self.minigame_corner)
+
+        if result['opened_merchant']:
+            self.state = "merchant"
+        elif result['healed']:
+            self.message_log.append("Rested at the Inn! HP restored.")
+            self._add_floating_text("FULL HEAL!", 300, 200, PALETTE['green'], 1.5)
+            self._add_particles(300, 200, PALETTE['green'], 20)
+            self.state = "playing"
+        else:
+            self.state = "playing"
+
+        self.minigame_corner = 0
+
+    def _finish_monster_minigame(self) -> None:
+        """Finish the monster minigame - apply damage or heal rewards."""
+        import random
+        from ..models.enums import Rarity
+
+        game = self.monster_game
+        won = game.result == "win"
+
+        player_stats = self.game.get_player_stats()
+
+        if won:
+            # Player survived! 10% heal and small chance for item
+            heal_amount = int(player_stats.max_hp * 0.10)
+            actual_heal = player_stats.heal(heal_amount)
+            if actual_heal > 0:
+                self.message_log.append(f"Survived the {game.monster_name}! Healed {actual_heal} HP!")
+                self._add_floating_text(f"+{actual_heal} HP", self.WINDOW_WIDTH - 200, 280, PALETTE['green'], 1.5)
+
+            # 15% chance for a random item reward
+            if random.random() < 0.15:
+                player = self.game.get_player_data()
+                round_num = player.current_round if player else 1
+                item_id = self.game.item_factory.create_item(round_num, rarity=Rarity.UNCOMMON)
+                self.pending_item_id = item_id
+                self.state = "item_choice"
+                self.message_log.append("The creature dropped something!")
+            else:
+                self.state = "playing"
+        else:
+            # Player failed! 30% max HP damage
+            damage = int(player_stats.max_hp * 0.30)
+            player_stats.take_damage(damage)
+            self.message_log.append(f"The {game.monster_name}'s {game.attack_name} hits you for {damage} damage!")
+            self._add_floating_text(f"-{damage} HP", self.WINDOW_WIDTH - 200, 280, PALETTE['red'], 1.5)
+            self.screen_shake = 0.3
+
+            # Check for death
+            if player_stats.current_hp <= 0:
+                self.game.is_game_over = True
+                self.state = "game_over"
+            else:
+                self.state = "playing"
+
+        # Reset the minigame
+        self.monster_game = MonsterMinigame()
+
+    def start_timing_minigame(self, difficulty: str = "normal") -> None:
+        """Start the timing bar minigame with given difficulty - HARD MODE."""
+        # Difficulty settings - MUCH HARDER than before
+        if difficulty == "easy":
+            sweet_size = random.uniform(0.12, 0.18)  # Was 0.25-0.35
+            bar_speed = random.uniform(2.0, 2.8)  # Was 1.0-1.3
+        elif difficulty == "hard":
+            sweet_size = random.uniform(0.06, 0.10)  # Was 0.1-0.15
+            bar_speed = random.uniform(3.5, 4.5)  # Was 2.0-2.5
+        else:  # normal
+            sweet_size = random.uniform(0.08, 0.14)  # Was 0.15-0.25
+            bar_speed = random.uniform(2.8, 3.5)  # Was 1.3-1.8
+
+        # Randomize sweet spot position (not at edges)
+        sweet_start = random.uniform(0.15, 0.85 - sweet_size)
+
+        self.timing_game = TimingMinigame(
+            active=True,
+            bar_position=0.0,
+            bar_speed=bar_speed,
+            bar_direction=1,
+            sweet_spot_start=sweet_start,
+            sweet_spot_end=sweet_start + sweet_size,
+            grace_period=1.5,
+            result=None,
+            result_timer=0.0,
+            reward_item_id=None
+        )
+        self.state = "minigame"
+
+    def start_roulette_minigame(self, difficulty: str = "normal") -> None:
+        """Start the roulette wheel minigame."""
+        # Initial spin speed varies by difficulty
+        if difficulty == "easy":
+            speed = random.uniform(8.0, 12.0)
+        elif difficulty == "hard":
+            speed = random.uniform(14.0, 20.0)
+        else:
+            speed = random.uniform(10.0, 15.0)
+
+        self.roulette_game = RouletteMinigame(
+            active=True,
+            wheel_angle=random.uniform(0, 2 * 3.14159),
+            wheel_speed=speed,
+            is_spinning=False,
+            stopped=False,
+            grace_period=1.5,
+            result=None,
+            result_timer=0.0,
+            reward_item_id=None,
+            selected_segment=-1,
+            reward_type=""
+        )
+        self.state = "minigame"
+
+    def start_claw_minigame(self, difficulty: str = "normal") -> None:
+        """Start the claw machine minigame."""
+        # Generate items and rocks
+        # Pit area in draw code is: pygame.Rect(40, 180, panel_w - 80, 140) = x:40-370, y:180-320
+        # Claw drops to y=300, so items should be near bottom of pit
+        items = []
+        pit_left, pit_right = 60, 360
+        pit_bottom = 300  # Items sit at bottom of pit
+
+        # Number of good items and rocks based on difficulty
+        if difficulty == "easy":
+            num_items, num_rocks = 8, 3
+            attempts = 3
+        elif difficulty == "hard":
+            num_items, num_rocks = 4, 8
+            attempts = 2
+        else:
+            num_items, num_rocks = 6, 5
+            attempts = 3
+
+        # Add treasure items - spread along bottom of pit
+        for _ in range(num_items):
+            x = random.uniform(pit_left + 20, pit_right - 20)
+            y = random.uniform(pit_bottom - 30, pit_bottom + 10)  # Near bottom: y=270-310
+            item_type = random.choice(["gold", "potion", "gem"])
+            items.append([x, y, item_type, False])
+
+        # Add rocks (obstacles) - also near bottom
+        for _ in range(num_rocks):
+            x = random.uniform(pit_left + 15, pit_right - 15)
+            y = random.uniform(pit_bottom - 25, pit_bottom + 5)  # y=275-305
+            items.append([x, y, "rock", True])
+
+        self.claw_game = ClawMinigame(
+            active=True,
+            claw_x=225.0,
+            claw_y=60.0,
+            claw_state="moving",
+            attempts_left=attempts,
+            held_item=None,
+            items=items,
+            grace_period=1.5,
+            result=None,
+            result_timer=0.0,
+            reward_item_id=None
+        )
+        self.state = "minigame"
+
+    def start_flappy_minigame(self, difficulty: str = "normal") -> None:
+        """Start the flappy bird minigame."""
+        # Difficulty settings (increased time limits for longer gameplay)
+        if difficulty == "easy":
+            gap_height = 120
+            time_limit = 15.0
+            coins_needed = 4
+            scroll_speed = 120
+        elif difficulty == "hard":
+            gap_height = 70
+            time_limit = 11.0
+            coins_needed = 6
+            scroll_speed = 180
+        else:
+            gap_height = 90
+            time_limit = 13.0
+            coins_needed = 5
+            scroll_speed = 150
+
+        # Generate initial obstacles and coins (start further away for grace period)
+        obstacles = []
+        coins = []
+        for i in range(6):
+            x = 550 + i * 150  # Start obstacles further away
+            gap_y = random.uniform(100, 250)
+            obstacles.append([x, gap_y, gap_height])
+            coins.append([x + 20, gap_y, False])
+
+        self.flappy_game = FlappyMinigame(
+            active=True,
+            bird_y=175.0,
+            bird_velocity=0.0,
+            obstacles=obstacles,
+            coins=coins,
+            coins_collected=0,
+            coins_needed=coins_needed,
+            game_timer=0.0,
+            time_limit=time_limit,
+            grace_period=1.0,  # 1 second before bird starts falling
+            result=None,
+            result_timer=0.0,
+            reward_item_id=None
+        )
+        self.flappy_game.scroll_speed = scroll_speed  # Store for update
+        self.state = "minigame"
+
+    def start_archery_minigame(self, difficulty: str = "normal") -> None:
+        """Start the archery target shooting minigame."""
+        import random
+
+        # Difficulty settings
+        if difficulty == "easy":
+            shots_allowed = 6
+            bullseyes_needed = 2
+            target_moving = False
+            target_speed = 0.0
+            wind_strength = 0.0
+        elif difficulty == "hard":
+            shots_allowed = 4
+            bullseyes_needed = 3
+            target_moving = True
+            target_speed = 80.0
+            wind_strength = random.uniform(-40, 40)
+        else:  # normal
+            shots_allowed = 5
+            bullseyes_needed = 2
+            target_moving = True
+            target_speed = 50.0
+            wind_strength = random.uniform(-25, 25)
+
+        self.archery_game = ArcheryMinigame(
+            active=True,
+            bow_y=175.0,
+            aim_angle=0.0,
+            power=0.0,
+            charging=False,
+            arrow_flying=False,
+            arrow_x=60.0,
+            arrow_y=175.0,
+            arrow_vx=0.0,
+            arrow_vy=0.0,
+            target_x=380.0,
+            target_y=175.0,
+            target_moving=target_moving,
+            target_direction=1,
+            target_speed=target_speed,
+            wind_strength=wind_strength,
+            shots_taken=0,
+            shots_allowed=shots_allowed,
+            bullseyes=0,
+            bullseyes_needed=bullseyes_needed,
+            score=0,
+            grace_period=1.5,
+            last_hit_text="",
+            last_hit_timer=0.0,
+            result=None,
+            result_timer=0.0,
+            reward_item_id=None
+        )
+        self.state = "minigame"
+
+    def start_blacksmith_minigame(self, difficulty: str = "normal") -> None:
+        """Start the blacksmith gamble minigame."""
+        from ..models.enums import Rarity
+        # Generate an item to upgrade (starts at Common or Uncommon)
+        player = self.game.get_player_data()
+        round_num = player.current_round if player else 1
+
+        # Create a common item for the gamble
+        item_id = self.game.item_factory.create_item(round_num, rarity=Rarity.COMMON)
+
+        # Difficulty affects starting rarity
+        if difficulty == "easy":
+            start_rarity = 1  # Start with Uncommon
+        elif difficulty == "hard":
+            start_rarity = 0  # Start with Common, harder success rates
+        else:
+            start_rarity = 0  # Common
+
+        self.blacksmith_game = BlacksmithMinigame(
+            active=True,
+            item_id=item_id,
+            current_rarity=start_rarity,
+            upgrade_level=0,
+            is_rolling=False,
+            roll_timer=0.0,
+            roll_result=None,
+            sparks_timer=0.0,
+            player_chose=False,
+            item_broken=False,
+            grace_period=1.0,
+            result=None,
+            result_timer=0.0,
+            reward_item_id=None
+        )
+        self.state = "minigame"
+
+    def start_monster_minigame(self) -> None:
+        """Start the monster attack minigame - survive 5 rounds of arrow sequences!
+
+        Triggered by curse squares. Fail = 30% HP damage, Pass = 10% heal + item chance.
+        """
+        import random
+
+        # Monster names for variety
+        monster_names = [
+            ("Shadow Beast", "Dark Pulse"),
+            ("Cursed Specter", "Soul Drain"),
+            ("Nightmare Fiend", "Terror Wave"),
+            ("Void Walker", "Abyss Strike"),
+            ("Demon Spawn", "Hellfire Burst"),
+        ]
+        monster_name, attack_name = random.choice(monster_names)
+
+        # Generate first round sequence
+        arrows = ["up", "down", "left", "right"]
+        first_sequence = [random.choice(arrows) for _ in range(4)]  # Round 1 = 4 arrows
+
+        self.monster_game = MonsterMinigame(
+            active=True,
+            current_round=1,
+            max_rounds=5,
+            arrows_per_round=[4, 8, 16, 20, 25],
+            sequence=first_sequence,
+            player_index=0,
+            round_timer=10.0,
+            round_time_limit=10.0,
+            grace_period=2.0,  # Brief "GET READY" before starting
+            showing_sequence=False,  # No memorization - show all arrows immediately
+            sequence_show_index=0,
+            sequence_show_timer=0.0,
+            last_input_correct=None,
+            input_flash_timer=0.0,
+            monster_name=monster_name,
+            attack_name=attack_name,
+            result=None,
+            result_timer=0.0,
+            reward_item_id=None
+        )
+        self.state = "minigame"
+
+    def _generate_monster_round_sequence(self, round_num: int) -> List[str]:
+        """Generate arrow sequence for a monster minigame round."""
+        import random
+        arrows = ["up", "down", "left", "right"]
+        count = self.monster_game.arrows_per_round[round_num - 1]
+        return [random.choice(arrows) for _ in range(count)]
 
     def _handle_battle_keys(self, event: pygame.event.Event) -> None:
         """Handle keys during battle animation."""
@@ -221,6 +1069,18 @@ class GameUI:
         self._board_surface = None  # Reset cached board
         self._stone_surface = None  # Reset stone surface cache
         sprites.clear_cache("dragon")  # Clear dragon sprites to use updated drawing
+
+        # Reset all minigame states
+        self.timing_game = TimingMinigame()
+        self.roulette_game = RouletteMinigame()
+        self.claw_game = ClawMinigame()
+        self.flappy_game = FlappyMinigame()
+        self.archery_game = ArcheryMinigame()
+        self.blacksmith_game = BlacksmithMinigame()
+        self.monster_game = MonsterMinigame()
+        self.minigame_corner = 0
+        self.pending_corner_function = False
+
         # Initialize player movement at starting position
         start_pos = self.game.get_player_position() or 0
         self.player_movement = PlayerMovement(
@@ -268,13 +1128,23 @@ class GameUI:
                 self.message_log.append("Equipped!")
             self._add_particles(self.WINDOW_WIDTH // 2, self.WINDOW_HEIGHT // 2, PALETTE['green'], 15)
             self.pending_item_id = None
-            self.state = "playing"
+            # Check if we need to process corner function after minigame win
+            if self.pending_corner_function:
+                self.pending_corner_function = False
+                self._process_corner_after_minigame()
+            else:
+                self.state = "playing"
         elif event.key in (pygame.K_s, pygame.K_ESCAPE):
             gold = self.game.sell_item(self.pending_item_id)
             self.message_log.append(f"Sold for {gold}g!")
             self._add_particles(self.WINDOW_WIDTH // 2, self.WINDOW_HEIGHT // 2, PALETTE['gold'], 15)
             self.pending_item_id = None
-            self.state = "playing"
+            # Check if we need to process corner function after minigame win
+            if self.pending_corner_function:
+                self.pending_corner_function = False
+                self._process_corner_after_minigame()
+            else:
+                self.state = "playing"
         self.message_log = self.message_log[-8:]
 
     def _handle_merchant_keys(self, event: pygame.event.Event) -> None:
@@ -429,14 +1299,31 @@ class GameUI:
 
         self.message_log.append(f"Rolled {result.move_result.roll_text}!")
 
-        # Check for combat - start battle scene
-        if result.combat_result:
-            self.pending_turn_result = result
-            self._start_battle(result)
-            return  # Don't process rest until battle finishes
+        # Store result to process after movement animation completes
+        self.pending_turn_result = result
 
-        # Process non-combat results immediately
-        self._process_turn_result(result)
+        # Check for combat - start battle scene (will process after battle)
+        if result.combat_result:
+            self._start_battle(result)
+
+    def _start_boss_cinematic(self, result: TurnResult) -> None:
+        """Start the epic boss introduction cinematic."""
+        import random
+        self.boss_cinematic = BossCinematic(
+            active=True,
+            phase="awaken",
+            timer=0.0,
+            dragon_x=0.5,  # Start at center
+            dragon_y=0.5,
+            speech_text="",
+            speech_index=0,
+            screen_flash=1.0,  # Start with flash
+            screen_shake=0.5,
+            pending_battle_result=result,
+            dragon_scale=1.0,
+        )
+        # Play dramatic sound effect placeholder
+        self.message_log.append("The Ancient Dragon breaks free!")
 
     def _start_battle(self, result: TurnResult) -> None:
         """Start the Pokemon-style battle scene."""
@@ -447,6 +1334,11 @@ class GameUI:
             return
 
         is_boss = result.is_boss_fight
+
+        # For boss fights, start the epic cinematic first
+        if is_boss and not self.boss_cinematic.active:
+            self._start_boss_cinematic(result)
+            return
 
         # Get monster name from combat result
         monster_name = result.combat_result.monster_name or "Monster"
@@ -485,14 +1377,14 @@ class GameUI:
         )
 
     def _finish_battle(self) -> None:
-        """Finish battle and process turn result."""
+        """Finish battle and show combat results (further processing waits for movement)."""
         self.battle_scene.dismiss()
 
         if self.pending_turn_result:
             result = self.pending_turn_result
-            self.pending_turn_result = None
+            # Don't clear pending_turn_result - let _update() process it after movement completes
 
-            # Add combat results to log
+            # Add combat results to log immediately
             self.combat_log = result.combat_result.log[-10:] if result.combat_result else []
             self.screen_shake = 0.3
 
@@ -506,16 +1398,19 @@ class GameUI:
                 else:
                     self.message_log.append("Defeated!")
 
-            # Process other results
-            self._process_turn_result(result)
-
     def _process_turn_result(self, result: TurnResult) -> None:
         """Process non-combat turn results."""
         if result.blessing_received:
             self.message_log.append(f"Blessing: {result.blessing_received.name}")
             self._add_particles(300, 200, PALETTE['purple'], 15)
         if result.healed:
-            self.message_log.append("Rested! HP restored.")
+            if result.heal_amount > 0:
+                self.message_log.append(f"Passed START! +{result.heal_amount} HP!")
+                # Show floating heal text near player/start area
+                self._add_floating_text(f"+{result.heal_amount} HP", 120, 430, PALETTE['green'], 2.0)
+            else:
+                self.message_log.append("Rested! HP restored.")
+                self._add_floating_text("FULL HEAL!", 300, 200, PALETTE['green'], 1.5)
             self._add_particles(300, 200, PALETTE['green'], 15)
         if result.monsters_spawned:
             # Curse triggered!
@@ -523,6 +1418,53 @@ class GameUI:
             self.message_log.append(f"CURSED! {num} monsters spawned!")
             self._add_particles(300, 200, (150, 50, 180), 20)  # Purple particles
             self.screen_shake = 0.4
+        if result.trigger_monster_minigame:
+            # Monster attack minigame from curse!
+            self.message_log.append("A dark creature attacks!")
+            self._add_particles(300, 200, PALETTE['red'], 25)
+            self.screen_shake = 0.3
+            self.start_monster_minigame()
+            return  # Don't process other results until minigame is done
+        if result.trigger_minigame:
+            # Store which corner triggered this minigame
+            self.minigame_corner = result.minigame_corner
+
+            # Determine difficulty based on round
+            player = self.game.get_player_data()
+            round_num = player.current_round if player else 1
+            if round_num <= 5:
+                difficulty = "easy"
+            elif round_num <= 15:
+                difficulty = "normal"
+            else:
+                difficulty = "hard"
+
+            # Start the appropriate minigame
+            if result.trigger_minigame == "timing":
+                self.message_log.append("MINIGAME: Timing Challenge!")
+                self._add_particles(300, 200, PALETTE['gold'], 15)
+                self.start_timing_minigame(difficulty)
+            elif result.trigger_minigame == "roulette":
+                self.message_log.append("MINIGAME: Wheel of Fortune!")
+                self._add_particles(300, 200, PALETTE['purple'], 15)
+                self.start_roulette_minigame(difficulty)
+            elif result.trigger_minigame == "claw":
+                self.message_log.append("MINIGAME: Claw Machine!")
+                self._add_particles(300, 200, (100, 200, 255), 15)
+                self.start_claw_minigame(difficulty)
+            elif result.trigger_minigame == "flappy":
+                self.message_log.append("MINIGAME: Flappy Challenge!")
+                self._add_particles(300, 200, PALETTE['green'], 15)
+                self.start_flappy_minigame(difficulty)
+            elif result.trigger_minigame == "archery":
+                self.message_log.append("MINIGAME: Archery Challenge!")
+                self._add_particles(300, 200, (139, 90, 43), 15)
+                self.start_archery_minigame(difficulty)
+            elif result.trigger_minigame == "blacksmith":
+                self.message_log.append("MINIGAME: Blacksmith's Gamble!")
+                self._add_particles(300, 200, (255, 150, 50), 15)
+                self.start_blacksmith_minigame(difficulty)
+            return  # Don't process other results until minigame is done
         if result.opened_merchant:
             self.state = "merchant"
         if result.pending_item:
@@ -548,11 +1490,442 @@ class GameUI:
                 'size': random.randint(2, 5),
             })
 
+    def _add_floating_text(self, text: str, x: int, y: int, color: Tuple, duration: float = 1.5):
+        """Add floating text that rises and fades."""
+        self.floating_texts.append({
+            'text': text,
+            'x': x,
+            'y': y,
+            'vy': -60,  # Rise speed
+            'life': duration,
+            'max_life': duration,
+            'color': color,
+        })
+
+    def _update_minigames(self, dt: float) -> None:
+        """Update minigame state when a minigame is active."""
+        # Update timing minigame
+        if self.timing_game.active:
+            if self.timing_game.result:
+                self.timing_game.result_timer -= dt
+                if self.timing_game.result_timer <= 0:
+                    self._finish_minigame(self.timing_game)
+            else:
+                if self.timing_game.grace_period > 0:
+                    self.timing_game.grace_period -= dt
+                else:
+                    self.timing_game.bar_position += self.timing_game.bar_speed * self.timing_game.bar_direction * dt
+                    if self.timing_game.bar_position >= 1.0:
+                        self.timing_game.bar_position = 1.0
+                        self.timing_game.bar_direction = -1
+                    elif self.timing_game.bar_position <= 0.0:
+                        self.timing_game.bar_position = 0.0
+                        self.timing_game.bar_direction = 1
+
+        # Update roulette minigame
+        if self.roulette_game.active:
+            if self.roulette_game.result:
+                self.roulette_game.result_timer -= dt
+                if self.roulette_game.result_timer <= 0:
+                    self._finish_minigame(self.roulette_game)
+            else:
+                if self.roulette_game.grace_period > 0:
+                    self.roulette_game.grace_period -= dt
+                elif self.roulette_game.is_spinning and not self.roulette_game.stopped:
+                    self.roulette_game.wheel_angle += self.roulette_game.wheel_speed * dt
+                    self.roulette_game.wheel_speed -= 2.5 * dt
+                    if self.roulette_game.wheel_speed <= 0:
+                        self.roulette_game.wheel_speed = 0
+                        self.roulette_game.stopped = True
+                        segment_angle = (2 * 3.14159) / 8
+                        # Pointer is at TOP (angle -π/2 = 3π/2 in pygame coords)
+                        # Find which segment the pointer is actually pointing at
+                        pointer_angle = 3 * 3.14159 / 2  # 3π/2 = top of wheel
+                        effective_angle = (pointer_angle - self.roulette_game.wheel_angle) % (2 * 3.14159)
+                        self.roulette_game.selected_segment = int(effective_angle / segment_angle) % 8
+                        if self.roulette_game.selected_segment in [0, 2, 4, 6]:
+                            self.roulette_game.result = "win"
+                            self.roulette_game.reward_type = ["epic", "gold", "rare", "blessing"][self.roulette_game.selected_segment // 2]
+                            self._add_particles(self.WINDOW_WIDTH - 245, 280, PALETTE['gold'], 30)
+                            self._generate_roulette_reward(self.roulette_game)
+                        else:
+                            self.roulette_game.result = "lose"
+                            self.screen_shake = 0.2
+                        self.roulette_game.result_timer = 2.0
+
+        # Update claw minigame
+        if self.claw_game.active:
+            if self.claw_game.result:
+                self.claw_game.result_timer -= dt
+                if self.claw_game.result_timer <= 0:
+                    self._finish_minigame(self.claw_game)
+            else:
+                if self.claw_game.grace_period > 0:
+                    self.claw_game.grace_period -= dt
+                elif self.claw_game.claw_state == "dropping":
+                    self.claw_game.claw_y += 200 * dt
+                    if self.claw_game.claw_y >= 300:  # Drop to bottom of pit
+                        self.claw_game.claw_y = 300
+                        self.claw_game.claw_state = "grabbing"
+                        # Find closest item within grab range
+                        grabbed = None
+                        best_dist = 50  # Grab radius
+                        for item in self.claw_game.items:
+                            x, y, item_type, is_rock = item
+                            # Use actual distance, not Manhattan
+                            dx = x - self.claw_game.claw_x
+                            dy = y - self.claw_game.claw_y
+                            dist = (dx * dx + dy * dy) ** 0.5
+                            if dist < best_dist:
+                                best_dist = dist
+                                grabbed = item
+                        if grabbed:
+                            self.claw_game.held_item = grabbed[2]
+                            self.claw_game.items.remove(grabbed)
+                        self.claw_game.claw_state = "rising"
+                elif self.claw_game.claw_state == "rising":
+                    self.claw_game.claw_y -= 150 * dt
+                    if self.claw_game.held_item and random.random() < 0.01:
+                        self.claw_game.held_item = None
+                    if self.claw_game.claw_y <= 60:
+                        self.claw_game.claw_y = 60
+                        self.claw_game.attempts_left -= 1
+                        if self.claw_game.held_item and self.claw_game.held_item != "rock":
+                            self.claw_game.result = "win"
+                            self._add_particles(self.WINDOW_WIDTH - 245, 150, PALETTE['gold'], 30)
+                            self._generate_minigame_reward(self.claw_game)
+                            self.claw_game.result_timer = 2.0
+                        elif self.claw_game.held_item == "rock":
+                            self.claw_game.held_item = None
+                            self.screen_shake = 0.2
+                            if self.claw_game.attempts_left <= 0:
+                                self.claw_game.result = "lose"
+                                self.claw_game.result_timer = 2.0
+                            else:
+                                self.claw_game.claw_state = "moving"
+                        elif self.claw_game.attempts_left <= 0:
+                            self.claw_game.result = "lose"
+                            self.claw_game.result_timer = 2.0
+                        else:
+                            self.claw_game.claw_state = "moving"
+                            self.claw_game.held_item = None
+
+        # Update flappy minigame
+        if self.flappy_game.active:
+            if self.flappy_game.result:
+                self.flappy_game.result_timer -= dt
+                if self.flappy_game.result_timer <= 0:
+                    self._finish_minigame(self.flappy_game)
+            else:
+                if self.flappy_game.grace_period > 0:
+                    self.flappy_game.grace_period -= dt
+                else:
+                    self.flappy_game.bird_velocity += 800 * dt
+                    self.flappy_game.bird_y += self.flappy_game.bird_velocity * dt
+
+                scroll_speed = getattr(self.flappy_game, 'scroll_speed', 150)
+                for i, obs in enumerate(self.flappy_game.obstacles):
+                    self.flappy_game.obstacles[i] = [obs[0] - scroll_speed * dt, obs[1], obs[2]]
+                for i, coin in enumerate(self.flappy_game.coins):
+                    self.flappy_game.coins[i] = [coin[0] - scroll_speed * dt, coin[1], coin[2]]
+
+                if self.flappy_game.obstacles and self.flappy_game.obstacles[0][0] < -50:
+                    self.flappy_game.obstacles.pop(0)
+                    if self.flappy_game.coins and not self.flappy_game.coins[0][2]:
+                        self.flappy_game.coins.pop(0)
+                    last_x = self.flappy_game.obstacles[-1][0] if self.flappy_game.obstacles else 400
+                    new_x = last_x + random.uniform(140, 180)
+                    gap_y = random.uniform(100, 250)
+                    gap_h = self.flappy_game.obstacles[0][2] if self.flappy_game.obstacles else 90
+                    self.flappy_game.obstacles.append([new_x, gap_y, gap_h])
+                    self.flappy_game.coins.append([new_x + 20, gap_y, False])
+
+                bird_x = 80
+                for i, coin in enumerate(self.flappy_game.coins):
+                    if not coin[2] and abs(coin[0] - bird_x) < 25 and abs(coin[1] - self.flappy_game.bird_y) < 25:
+                        self.flappy_game.coins[i][2] = True
+                        self.flappy_game.coins_collected += 1
+                        self._add_particles(self.WINDOW_WIDTH - 245 + int(coin[0]) // 5, 170 + int(coin[1]) // 3, PALETTE['gold'], 5)
+
+                for obs in self.flappy_game.obstacles:
+                    if abs(obs[0] - bird_x) < 25:
+                        gap_top = obs[1] - obs[2] / 2
+                        gap_bottom = obs[1] + obs[2] / 2
+                        if self.flappy_game.bird_y < gap_top or self.flappy_game.bird_y > gap_bottom:
+                            self.flappy_game.result = "lose"
+                            self.screen_shake = 0.3
+                            self.flappy_game.result_timer = 2.0
+                            break
+
+                if self.flappy_game.bird_y < 20 or self.flappy_game.bird_y > 330:
+                    self.flappy_game.result = "lose"
+                    self.screen_shake = 0.3
+                    self.flappy_game.result_timer = 2.0
+
+                self.flappy_game.game_timer += dt
+                if self.flappy_game.coins_collected >= self.flappy_game.coins_needed:
+                    self.flappy_game.result = "win"
+                    self._add_particles(self.WINDOW_WIDTH - 245, 200, PALETTE['gold'], 30)
+                    self._generate_minigame_reward(self.flappy_game)
+                    self.flappy_game.result_timer = 2.0
+                elif self.flappy_game.game_timer >= self.flappy_game.time_limit:
+                    self.flappy_game.result = "lose"
+                    self.flappy_game.result_timer = 2.0
+
+        # Update archery minigame
+        if self.archery_game.active:
+            game = self.archery_game
+            if game.result:
+                game.result_timer -= dt
+                if game.result_timer <= 0:
+                    self._finish_minigame(self.archery_game)
+            else:
+                if game.grace_period > 0:
+                    game.grace_period -= dt
+                else:
+                    if not game.arrow_flying:
+                        game.power += dt * 1.5 * (1 if game.charging else 1)
+                        if game.power >= 1.0:
+                            game.power = 1.0
+                            game.charging = False
+                        elif game.power <= 0.0:
+                            game.power = 0.0
+                            game.charging = True
+                        if not hasattr(game, '_power_dir'):
+                            game._power_dir = 1
+                        game.power += dt * 2.0 * game._power_dir
+                        if game.power >= 1.0:
+                            game.power = 1.0
+                            game._power_dir = -1
+                        elif game.power <= 0.0:
+                            game.power = 0.0
+                            game._power_dir = 1
+
+                    if game.target_moving:
+                        game.target_y += game.target_speed * game.target_direction * dt
+                        if game.target_y > 280:
+                            game.target_y = 280
+                            game.target_direction = -1
+                        elif game.target_y < 70:
+                            game.target_y = 70
+                            game.target_direction = 1
+
+                    if game.arrow_flying:
+                        game.arrow_vy += game.wind_strength * dt
+                        game.arrow_vy += 50 * dt
+                        game.arrow_x += game.arrow_vx * dt
+                        game.arrow_y += game.arrow_vy * dt
+
+                        if game.arrow_x >= game.target_x - 10:
+                            dist = abs(game.arrow_y - game.target_y)
+                            if dist < 12:
+                                game.bullseyes += 1
+                                game.score += 100
+                                game.last_hit_text = "BULLSEYE!"
+                                game.last_hit_timer = 1.0
+                                self._add_particles(self.WINDOW_WIDTH - 100, int(200 + game.target_y - 175), PALETTE['gold'], 20)
+                            elif dist < 30:
+                                game.score += 50
+                                game.last_hit_text = "GOOD!"
+                                game.last_hit_timer = 1.0
+                                self._add_particles(self.WINDOW_WIDTH - 100, int(200 + game.target_y - 175), PALETTE['green'], 10)
+                            elif dist < 50:
+                                game.score += 25
+                                game.last_hit_text = "OK"
+                                game.last_hit_timer = 1.0
+                            else:
+                                game.last_hit_text = "MISS!"
+                                game.last_hit_timer = 1.0
+                                self.screen_shake = 0.15
+
+                            game.arrow_flying = False
+                            if game.bullseyes >= game.bullseyes_needed:
+                                game.result = "win"
+                                self._add_particles(self.WINDOW_WIDTH - 245, 200, PALETTE['gold'], 30)
+                                self._generate_minigame_reward(game)
+                                game.result_timer = 2.5
+                            elif game.shots_taken >= game.shots_allowed:
+                                game.result = "lose"
+                                game.result_timer = 2.5
+
+                        elif game.arrow_x > 450 or game.arrow_y < 0 or game.arrow_y > 350:
+                            game.arrow_flying = False
+                            game.last_hit_text = "MISS!"
+                            game.last_hit_timer = 1.0
+                            if game.shots_taken >= game.shots_allowed:
+                                game.result = "lose"
+                                game.result_timer = 2.5
+
+                if game.last_hit_timer > 0:
+                    game.last_hit_timer -= dt
+
+        # Update blacksmith minigame
+        if self.blacksmith_game.active:
+            game = self.blacksmith_game
+            if game.result:
+                game.result_timer -= dt
+                if game.result_timer <= 0:
+                    self._finish_minigame(self.blacksmith_game)
+            else:
+                if game.grace_period > 0:
+                    game.grace_period -= dt
+                else:
+                    game.sparks_timer += dt
+                    if game.is_rolling:
+                        game.roll_timer += dt
+                        if game.roll_timer >= game.roll_duration:
+                            game.is_rolling = False
+                            if game.roll_result:
+                                game.current_rarity += 1
+                                game.upgrade_level += 1
+                                self._add_particles(self.WINDOW_WIDTH - 245, 200, PALETTE['gold'], 25)
+                                self._add_floating_text("UPGRADED!", self.WINDOW_WIDTH - 200, 250, PALETTE['gold'], 1.5)
+                                if game.current_rarity >= 4 or game.upgrade_level >= 3:
+                                    game.result = "win"
+                                    game.reward_item_id = game.item_id
+                                    game.result_timer = 2.5
+                            else:
+                                game.item_broken = True
+                                game.result = "lose"
+                                game.result_timer = 2.5
+                                self.screen_shake = 0.4
+                                self._add_particles(self.WINDOW_WIDTH - 245, 200, PALETTE['red'], 30)
+
+        # Update monster minigame
+        if self.monster_game.active:
+            game = self.monster_game
+            if game.result:
+                game.result_timer -= dt
+                if game.result_timer <= 0:
+                    self._finish_monster_minigame()
+            else:
+                # Update input flash timer
+                if game.input_flash_timer > 0:
+                    game.input_flash_timer -= dt
+
+                if game.grace_period > 0:
+                    game.grace_period -= dt
+                else:
+                    # Input phase - countdown timer (no memorization phase)
+                    game.round_timer -= dt
+                    if game.round_timer <= 0:
+                        # Time's up - FAIL!
+                        game.result = "lose"
+                        game.result_timer = 2.5
+                        self.screen_shake = 0.4
+                        self._add_particles(self.WINDOW_WIDTH - 245, 200, PALETTE['red'], 30)
+                        self._add_floating_text("TIME'S UP!", self.WINDOW_WIDTH - 200, 200, PALETTE['red'], 1.5)
+
+        # Update screen shake
+        if self.screen_shake > 0:
+            self.screen_shake -= dt
+
+    def _update_boss_cinematic(self, dt: float) -> None:
+        """Update the epic boss introduction cinematic."""
+        import random
+        cine = self.boss_cinematic
+        cine.timer += dt
+
+        # Update screen effects
+        if cine.screen_flash > 0:
+            cine.screen_flash -= dt * 2
+        if cine.screen_shake > 0:
+            cine.screen_shake -= dt
+
+        if cine.phase == "awaken":
+            # Phase 1: Dragon awakens (2 seconds) - dramatic buildup
+            if cine.timer < 0.5:
+                # Initial flash
+                cine.screen_shake = 0.3
+            elif cine.timer < 1.5:
+                # Dragon scales up dramatically
+                cine.dragon_scale = 1.0 + (cine.timer - 0.5) * 0.3
+            elif cine.timer >= 2.0:
+                # Transition to speech
+                cine.phase = "speech"
+                cine.timer = 0.0
+                cine.speech_text = random.choice(self.BOSS_ENTRANCE_QUOTES)
+                cine.screen_flash = 0.5
+
+        elif cine.phase == "speech":
+            # Phase 2: Dragon says something funny (3 seconds)
+            if cine.timer >= 3.0:
+                cine.phase = "exit"
+                cine.timer = 0.0
+
+        elif cine.phase == "exit":
+            # Phase 3: Dragon moves right off the board (1.5 seconds)
+            progress = min(1.0, cine.timer / 1.5)
+            # Ease out - fast start, slow end
+            eased = 1 - (1 - progress) ** 2
+            cine.dragon_x = 0.5 + eased * 1.0  # Move from center (0.5) to off-screen (1.5)
+
+            if cine.timer >= 1.5:
+                cine.phase = "transition"
+                cine.timer = 0.0
+                cine.screen_flash = 0.8
+
+        elif cine.phase == "transition":
+            # Phase 4: Brief black screen transition (0.5 seconds)
+            if cine.timer >= 0.5:
+                # Start the actual battle with entrance animation
+                cine.active = False
+                if cine.pending_battle_result:
+                    # Start battle with entrance flag
+                    self._start_battle_with_entrance(cine.pending_battle_result)
+
+    def _start_battle_with_entrance(self, result: TurnResult) -> None:
+        """Start battle scene with monster entrance animation."""
+        player = self.game.get_player_data()
+        stats = self.game.get_player_stats()
+
+        if not player or not stats or not result.combat_result:
+            return
+
+        monster_name = "Ancient Dragon"
+        monster_type = "dragon"
+        monster_max_hp = 200 + player.current_round * 20
+
+        # Start battle scene with entrance animation enabled
+        self.battle_scene.start_battle(
+            char_id=player.character_id,
+            monster_type=monster_type,
+            monster_name=monster_name,
+            is_boss=True,
+            combat_result=result.combat_result,
+            player_max_hp=stats.max_hp,
+            monster_max_hp=monster_max_hp,
+            player_start_hp=stats.current_hp + result.combat_result.damage_taken,
+            monster_start_hp=monster_max_hp,
+            monster_entrance=True,  # Enable entrance animation
+        )
+
     def _update(self, dt: float) -> None:
         """Update game state and animations."""
+        # Update boss cinematic if active
+        if self.boss_cinematic.active:
+            self._update_boss_cinematic(dt)
+            return
+
         # Update battle scene if active
         if self.battle_scene.is_active():
             self.battle_scene.update(dt)
+            return
+
+        # Check if any minigame is active - skip main game updates if so
+        minigame_active = any([
+            self.timing_game.active,
+            self.roulette_game.active,
+            self.claw_game.active,
+            self.flappy_game.active,
+            self.archery_game.active,
+            self.blacksmith_game.active,
+            self.monster_game.active
+        ])
+
+        if minigame_active:
+            # Only update minigames, skip main game updates
+            self._update_minigames(dt)
             return
 
         # Check for hovered item slot
@@ -560,6 +1933,13 @@ class GameUI:
         for slot in self.item_slots:
             if slot.rect.collidepoint(self.mouse_pos):
                 self.hovered_slot = slot
+                break
+
+        # Check for hovered blessing
+        self.hovered_blessing = None
+        for rect, blessing in self.blessing_rects:
+            if rect.collidepoint(self.mouse_pos):
+                self.hovered_blessing = blessing
                 break
 
         # Update dice animation
@@ -620,6 +2000,13 @@ class GameUI:
                 self._add_particles(x + self.SQUARE_SIZE // 2, y + self.SQUARE_SIZE // 2 + 10,
                                   (150, 140, 120), 3)
 
+        # Process pending turn result after movement animation completes
+        movement_done = not pm.path or pm.path_index >= len(pm.path) - 1
+        if movement_done and self.pending_turn_result and not self.battle_scene.is_active():
+            result = self.pending_turn_result
+            self.pending_turn_result = None
+            self._process_turn_result(result)
+
         # Update dragon speech bubble timer
         if self.dragon_speech_timer > 0:
             self.dragon_speech_timer -= dt
@@ -634,6 +2021,13 @@ class GameUI:
             p['life'] -= dt
             if p['life'] <= 0:
                 self.particle_effects.remove(p)
+
+        # Update floating texts
+        for ft in self.floating_texts[:]:
+            ft['y'] += ft['vy'] * dt
+            ft['life'] -= dt
+            if ft['life'] <= 0:
+                self.floating_texts.remove(ft)
 
         # Update screen shake
         if self.screen_shake > 0:
@@ -670,9 +2064,27 @@ class GameUI:
 
             self.screen.blit(offset_surface, (shake_x, shake_y))
 
-            # Draw battle scene (in corner panel, over game but under overlays)
-            if self.battle_scene.is_active():
+            # Draw boss cinematic (full screen overlay)
+            if self.boss_cinematic.active:
+                self._draw_boss_cinematic()
+
+            # Draw battle scene or minigame (in corner panel, over game but under overlays)
+            elif self.battle_scene.is_active():
                 self.battle_scene.draw(self.screen)
+            elif self.timing_game.active:
+                self._draw_timing_minigame()
+            elif self.roulette_game.active:
+                self._draw_roulette_minigame()
+            elif self.claw_game.active:
+                self._draw_claw_minigame()
+            elif self.flappy_game.active:
+                self._draw_flappy_minigame()
+            elif self.archery_game.active:
+                self._draw_archery_minigame()
+            elif self.blacksmith_game.active:
+                self._draw_blacksmith_minigame()
+            elif self.monster_game.active:
+                self._draw_monster_minigame()
 
             # Overlays (no shake)
             if self.state == "item_choice":
@@ -686,11 +2098,14 @@ class GameUI:
             elif self.state == "settings":
                 self._draw_settings()
 
-            # Draw tooltip last
+            # Draw tooltips last
             if self.hovered_slot and self.hovered_slot.item_id:
                 self._draw_item_tooltip(self.hovered_slot)
+            elif self.hovered_blessing:
+                self._draw_blessing_tooltip(self.hovered_blessing)
 
-        # Draw particles on top
+        # Draw floating texts and particles on top
+        self._draw_floating_texts()
         self._draw_particles()
 
     def _draw_background(self) -> None:
@@ -1270,7 +2685,7 @@ class GameUI:
             if item:
                 # Draw item icon
                 item_type = item.item_type
-                icon = sprites.create_item_icon(item_type, rarity, item.level, 40)
+                icon = sprites.create_item_icon(item_type, rarity, item.level, 40, item.theme, item.element)
                 surface.blit(icon, (sx + 15, sy + 8))
 
                 # Tier text (bottom-left to avoid frame overlap)
@@ -1300,8 +2715,18 @@ class GameUI:
         lines = [
             item.display_name,
             f"Rarity: {item.rarity.name}",
-            "",
         ]
+
+        # Theme info
+        if item.theme and item.theme != ItemTheme.NONE:
+            theme_display = item.theme_display
+            lines.append(f"Theme: {theme_display}")
+            # Add effect description
+            effect_desc = item.theme_effect_description
+            if effect_desc:
+                lines.append(f"  {effect_desc}")
+
+        lines.append("")
 
         # Stats
         stat_lines = []
@@ -1346,12 +2771,24 @@ class GameUI:
         pygame.draw.rect(tooltip_surf, (15, 15, 20, 240), (0, 0, tooltip_w, tooltip_h), border_radius=6)
         pygame.draw.rect(tooltip_surf, colors[0], (0, 0, tooltip_w, tooltip_h), 2, border_radius=6)
 
+        # Get theme color for themed items
+        theme_color = None
+        if item.theme and item.theme != ItemTheme.NONE:
+            theme_color = item.theme.color
+            if item.theme == ItemTheme.ELEMENTAL and item.element != Element.NONE:
+                theme_color = item.element.color
+
         # Text
         for i, line in enumerate(lines):
             if i == 0:
                 color = colors[0]  # Rarity color for name
+            elif "Theme:" in line and theme_color:
+                color = theme_color
             elif line.startswith("  ") and "+" in line:
                 color = PALETTE['green']
+            elif line.startswith("  ") and theme_color and i > 0 and "Theme:" in lines[i-1]:
+                # Effect description line - use theme color but dimmer
+                color = tuple(min(255, c + 50) for c in theme_color)
             elif "Sell:" in line:
                 color = PALETTE['gold']
             else:
@@ -1361,6 +2798,1062 @@ class GameUI:
             tooltip_surf.blit(text, (padding, padding + i * line_height))
 
         self.screen.blit(tooltip_surf, (tx, ty))
+
+    def _draw_blessing_tooltip(self, blessing) -> None:
+        """Draw tooltip for hovered blessing."""
+        from ..models.blessings import BlessingType
+
+        # Build tooltip lines
+        lines = []
+        lines.append((blessing.name, PALETTE['purple_light']))
+
+        # Effect description based on blessing type
+        effect_desc = {
+            BlessingType.CRIT_BOOST: f"+{blessing.value*100:.0f}% Critical Chance",
+            BlessingType.DAMAGE_BOOST: f"+{blessing.value:.0f} Damage",
+            BlessingType.DEFENSE_BOOST: f"+{blessing.value:.0f} Defense",
+            BlessingType.ATTACK_SPEED: f"+{blessing.value*100:.0f}% Attack Speed",
+            BlessingType.LIFE_STEAL: f"+{blessing.value*100:.0f}% Life Steal",
+            BlessingType.DODGE: f"+{blessing.value*100:.0f}% Dodge Chance",
+            BlessingType.MAX_HP: f"+{blessing.value:.0f} Max HP",
+            BlessingType.GOLD_FIND: f"+{blessing.value*100:.0f}% Gold Find",
+        }
+        effect = effect_desc.get(blessing.blessing_type, f"Effect: {blessing.value}")
+        lines.append((effect, PALETTE['cream']))
+
+        # Duration
+        if blessing.is_permanent:
+            lines.append(("Permanent", PALETTE['gold']))
+        else:
+            lines.append((f"Duration: {blessing.duration} rounds", PALETTE['gray_light']))
+
+        # Draw tooltip
+        padding = 10
+        line_height = 18
+        tooltip_w = 180
+        tooltip_h = len(lines) * line_height + padding * 2
+
+        tx = min(self.mouse_pos[0] + 15, self.WINDOW_WIDTH - tooltip_w - 10)
+        ty = min(self.mouse_pos[1] + 15, self.WINDOW_HEIGHT - tooltip_h - 10)
+
+        tooltip_surf = pygame.Surface((tooltip_w, tooltip_h), pygame.SRCALPHA)
+        pygame.draw.rect(tooltip_surf, (25, 15, 35, 240), (0, 0, tooltip_w, tooltip_h), border_radius=6)
+        pygame.draw.rect(tooltip_surf, PALETTE['purple'], (0, 0, tooltip_w, tooltip_h), 2, border_radius=6)
+
+        for i, (text, color) in enumerate(lines):
+            rendered = self.font_small.render(text, True, color)
+            tooltip_surf.blit(rendered, (padding, padding + i * line_height))
+
+        self.screen.blit(tooltip_surf, (tx, ty))
+
+    def _draw_timing_minigame(self) -> None:
+        """Draw the timing bar minigame in the battle panel area."""
+        # Panel dimensions (same as battle scene)
+        panel_w, panel_h = 450, 350
+        panel_x = self.WINDOW_WIDTH - panel_w - 20
+        panel_y = 170
+
+        # Create panel surface
+        panel = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+
+        # Panel background
+        pygame.draw.rect(panel, (20, 25, 35, 240), (0, 0, panel_w, panel_h), border_radius=8)
+        pygame.draw.rect(panel, PALETTE['gold'], (0, 0, panel_w, panel_h), 3, border_radius=8)
+
+        # Title
+        title = self.font_large.render("TIMING CHALLENGE", True, PALETTE['gold'])
+        title_rect = title.get_rect(centerx=panel_w // 2, y=15)
+        panel.blit(title, title_rect)
+
+        # Instructions
+        instr = self.font_small.render("Press SPACE when the bar is in the gold zone!", True, PALETTE['cream'])
+        instr_rect = instr.get_rect(centerx=panel_w // 2, y=50)
+        panel.blit(instr, instr_rect)
+
+        # Timing bar area
+        bar_x = 40
+        bar_y = 120
+        bar_w = panel_w - 80
+        bar_h = 50
+
+        # Draw bar background
+        pygame.draw.rect(panel, (30, 35, 45), (bar_x, bar_y, bar_w, bar_h), border_radius=6)
+
+        # Draw sweet spot (gold zone)
+        sweet_x = bar_x + int(self.timing_game.sweet_spot_start * bar_w)
+        sweet_w = int((self.timing_game.sweet_spot_end - self.timing_game.sweet_spot_start) * bar_w)
+        pygame.draw.rect(panel, (60, 50, 20), (sweet_x, bar_y, sweet_w, bar_h), border_radius=6)
+        pygame.draw.rect(panel, PALETTE['gold'], (sweet_x, bar_y, sweet_w, bar_h), 2, border_radius=6)
+
+        # Draw bar outline
+        pygame.draw.rect(panel, PALETTE['gray_light'], (bar_x, bar_y, bar_w, bar_h), 2, border_radius=6)
+
+        # Draw moving indicator
+        if not self.timing_game.result:
+            indicator_x = bar_x + int(self.timing_game.bar_position * bar_w)
+            indicator_w = 8
+            pygame.draw.rect(panel, PALETTE['red'], (indicator_x - indicator_w // 2, bar_y - 5, indicator_w, bar_h + 10), border_radius=3)
+            pygame.draw.rect(panel, (255, 200, 200), (indicator_x - indicator_w // 2 + 2, bar_y - 3, indicator_w - 4, bar_h + 6), border_radius=2)
+
+        # Draw difficulty info
+        difficulty = "Normal"
+        spot_size = self.timing_game.sweet_spot_end - self.timing_game.sweet_spot_start
+        if spot_size < 0.15:
+            difficulty = "Hard"
+        elif spot_size > 0.25:
+            difficulty = "Easy"
+        diff_text = self.font_small.render(f"Difficulty: {difficulty}", True, PALETTE['gray_light'])
+        panel.blit(diff_text, (bar_x, bar_y + bar_h + 15))
+
+        # Speed indicator
+        speed_text = self.font_small.render(f"Speed: {self.timing_game.bar_speed:.1f}x", True, PALETTE['gray_light'])
+        panel.blit(speed_text, (bar_x + bar_w - 80, bar_y + bar_h + 15))
+
+        # Grace period overlay
+        if self.timing_game.grace_period > 0 and not self.timing_game.result:
+            overlay = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 120))
+            panel.blit(overlay, (0, 0))
+            ready_text = self.font_large.render("GET READY!", True, PALETTE['gold'])
+            panel.blit(ready_text, ready_text.get_rect(center=(panel_w // 2, panel_h // 2 - 20)))
+            hint_text = self.font_small.render("Press SPACE when the bar hits the gold zone!", True, (255, 255, 255))
+            panel.blit(hint_text, hint_text.get_rect(center=(panel_w // 2, panel_h // 2 + 20)))
+
+        # Draw result with dark overlay
+        elif self.timing_game.result:
+            overlay = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 180))
+            panel.blit(overlay, (0, 0))
+
+            if self.timing_game.result == "win":
+                result_text = "SUCCESS!"
+                result_color = PALETTE['gold']
+                result_surf = self.font_large.render(result_text, True, result_color)
+                panel.blit(result_surf, result_surf.get_rect(center=(panel_w // 2, panel_h // 2 - 40)))
+
+                reward_text = self.font_medium.render("You won a rare item!", True, (255, 255, 255))
+                panel.blit(reward_text, reward_text.get_rect(center=(panel_w // 2, panel_h // 2)))
+
+                hint_text = self.font_small.render("Perfect timing!", True, PALETTE['gold'])
+                panel.blit(hint_text, hint_text.get_rect(center=(panel_w // 2, panel_h // 2 + 30)))
+            else:
+                result_text = "MISSED!"
+                result_color = PALETTE['red']
+                result_surf = self.font_large.render(result_text, True, result_color)
+                panel.blit(result_surf, result_surf.get_rect(center=(panel_w // 2, panel_h // 2 - 40)))
+
+                fail_text = self.font_medium.render("No reward this time...", True, PALETTE['gray_light'])
+                panel.blit(fail_text, fail_text.get_rect(center=(panel_w // 2, panel_h // 2)))
+
+                hint_text = self.font_small.render("Better luck next time!", True, PALETTE['gray_light'])
+                panel.blit(hint_text, hint_text.get_rect(center=(panel_w // 2, panel_h // 2 + 30)))
+
+        self.screen.blit(panel, (panel_x, panel_y))
+
+    def _draw_roulette_minigame(self) -> None:
+        """Draw the roulette wheel minigame."""
+        panel_w, panel_h = 450, 350
+        panel_x = self.WINDOW_WIDTH - panel_w - 20
+        panel_y = 170
+
+        panel = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+        pygame.draw.rect(panel, (20, 25, 35, 240), (0, 0, panel_w, panel_h), border_radius=8)
+        pygame.draw.rect(panel, PALETTE['purple'], (0, 0, panel_w, panel_h), 3, border_radius=8)
+
+        # Title
+        title = self.font_large.render("WHEEL OF FORTUNE", True, PALETTE['purple'])
+        panel.blit(title, title.get_rect(centerx=panel_w // 2, y=15))
+
+        # Wheel center
+        cx, cy = panel_w // 2, 180
+        radius = 100
+
+        # Segment colors and labels
+        segments = [
+            (PALETTE['gold'], "EPIC"),
+            ((80, 80, 90), "MISS"),
+            (PALETTE['green'], "GOLD"),
+            ((80, 80, 90), "MISS"),
+            ((100, 150, 255), "RARE"),
+            ((80, 80, 90), "MISS"),
+            (PALETTE['purple'], "BLESS"),
+            ((80, 80, 90), "MISS"),
+        ]
+
+        # Draw wheel segments
+        segment_angle = 2 * 3.14159 / 8
+        for i, (color, label) in enumerate(segments):
+            start = i * segment_angle + self.roulette_game.wheel_angle
+            # Draw pie segment
+            points = [(cx, cy)]
+            for j in range(11):
+                angle = start + j * segment_angle / 10
+                x = cx + radius * math.cos(angle)
+                y = cy + radius * math.sin(angle)
+                points.append((int(x), int(y)))
+            points.append((cx, cy))
+            pygame.draw.polygon(panel, color, points)
+            pygame.draw.polygon(panel, PALETTE['black'], points, 1)
+
+        # Wheel outline
+        pygame.draw.circle(panel, PALETTE['gray_light'], (cx, cy), radius, 3)
+        pygame.draw.circle(panel, PALETTE['gold'], (cx, cy), 15)
+
+        # Pointer at top
+        pygame.draw.polygon(panel, PALETTE['red'], [(cx - 12, 65), (cx + 12, 65), (cx, 90)])
+
+        # Grace period overlay
+        if self.roulette_game.grace_period > 0 and not self.roulette_game.result:
+            overlay = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 120))
+            panel.blit(overlay, (0, 0))
+            ready_text = self.font_large.render("GET READY!", True, PALETTE['purple'])
+            panel.blit(ready_text, ready_text.get_rect(center=(panel_w // 2, panel_h // 2 - 20)))
+            hint_text = self.font_small.render("Press SPACE to spin the wheel!", True, (255, 255, 255))
+            panel.blit(hint_text, hint_text.get_rect(center=(panel_w // 2, panel_h // 2 + 20)))
+
+        # Instructions or result
+        elif not self.roulette_game.is_spinning and not self.roulette_game.result:
+            instr = self.font_medium.render("Press SPACE to spin!", True, PALETTE['cream'])
+            panel.blit(instr, instr.get_rect(centerx=panel_w // 2, y=310))
+        elif self.roulette_game.result:
+            # Dark overlay for result
+            overlay = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 180))
+            panel.blit(overlay, (0, 0))
+
+            if self.roulette_game.result == "win":
+                result_text = "YOU WON!"
+                result_color = PALETTE['gold']
+                result_surf = self.font_large.render(result_text, True, result_color)
+                panel.blit(result_surf, result_surf.get_rect(center=(panel_w // 2, panel_h // 2 - 40)))
+
+                reward_text = self.font_medium.render(f"Prize: {self.roulette_game.reward_type.upper()}!", True, (255, 255, 255))
+                panel.blit(reward_text, reward_text.get_rect(center=(panel_w // 2, panel_h // 2)))
+
+                hint_text = self.font_small.render("Lucky spin!", True, PALETTE['gold'])
+                panel.blit(hint_text, hint_text.get_rect(center=(panel_w // 2, panel_h // 2 + 30)))
+            else:
+                result_text = "MISS!"
+                result_color = PALETTE['red']
+                result_surf = self.font_large.render(result_text, True, result_color)
+                panel.blit(result_surf, result_surf.get_rect(center=(panel_w // 2, panel_h // 2 - 40)))
+
+                fail_text = self.font_medium.render("No reward this time...", True, PALETTE['gray_light'])
+                panel.blit(fail_text, fail_text.get_rect(center=(panel_w // 2, panel_h // 2)))
+
+                hint_text = self.font_small.render("Better luck next time!", True, PALETTE['gray_light'])
+                panel.blit(hint_text, hint_text.get_rect(center=(panel_w // 2, panel_h // 2 + 30)))
+
+        self.screen.blit(panel, (panel_x, panel_y))
+
+    def _draw_claw_minigame(self) -> None:
+        """Draw the claw machine minigame."""
+        panel_w, panel_h = 450, 350
+        panel_x = self.WINDOW_WIDTH - panel_w - 20
+        panel_y = 170
+
+        panel = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+        pygame.draw.rect(panel, (25, 35, 45, 240), (0, 0, panel_w, panel_h), border_radius=8)
+        pygame.draw.rect(panel, (100, 200, 255), (0, 0, panel_w, panel_h), 3, border_radius=8)
+
+        # Title
+        title = self.font_large.render("CLAW MACHINE", True, (100, 200, 255))
+        panel.blit(title, title.get_rect(centerx=panel_w // 2, y=10))
+
+        # Attempts
+        attempts_text = f"Attempts: {self.claw_game.attempts_left}"
+        panel.blit(self.font_medium.render(attempts_text, True, PALETTE['gold']), (20, 40))
+
+        # Pit area
+        pit_rect = pygame.Rect(40, 180, panel_w - 80, 140)
+        pygame.draw.rect(panel, (40, 45, 55), pit_rect, border_radius=4)
+        pygame.draw.rect(panel, (100, 200, 255), pit_rect, 2, border_radius=4)
+
+        # Items
+        for item in self.claw_game.items:
+            x, y, item_type, is_rock = item
+            if is_rock:
+                pygame.draw.circle(panel, (90, 85, 80), (int(x), int(y)), 14)
+                pygame.draw.circle(panel, (70, 65, 60), (int(x), int(y)), 14, 2)
+            else:
+                color = PALETTE['gold'] if item_type == "gold" else PALETTE['green'] if item_type == "potion" else (150, 100, 200)
+                pygame.draw.circle(panel, color, (int(x), int(y)), 12)
+                pygame.draw.circle(panel, (255, 255, 255, 150), (int(x) - 3, int(y) - 3), 4)
+
+        # Claw
+        cx, cy = int(self.claw_game.claw_x), int(self.claw_game.claw_y)
+        pygame.draw.line(panel, (180, 180, 190), (cx, 50), (cx, cy), 3)
+        pygame.draw.line(panel, (180, 180, 190), (cx, cy), (cx - 18, cy + 25), 4)
+        pygame.draw.line(panel, (180, 180, 190), (cx, cy), (cx + 18, cy + 25), 4)
+        pygame.draw.circle(panel, (200, 200, 210), (cx, cy), 8)
+
+        # Held item
+        if self.claw_game.held_item:
+            color = PALETTE['gold'] if self.claw_game.held_item == "gold" else PALETTE['green'] if self.claw_game.held_item == "potion" else (150, 100, 200)
+            if self.claw_game.held_item == "rock":
+                color = (90, 85, 80)
+            pygame.draw.circle(panel, color, (cx, cy + 30), 10)
+
+        # Grace period overlay
+        if self.claw_game.grace_period > 0 and not self.claw_game.result:
+            overlay = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 120))
+            panel.blit(overlay, (0, 0))
+            ready_text = self.font_large.render("GET READY!", True, (100, 200, 255))
+            panel.blit(ready_text, ready_text.get_rect(center=(panel_w // 2, panel_h // 2 - 20)))
+            hint_text = self.font_small.render("Arrow keys to move, SPACE to drop!", True, (255, 255, 255))
+            panel.blit(hint_text, hint_text.get_rect(center=(panel_w // 2, panel_h // 2 + 20)))
+
+        # Instructions
+        elif not self.claw_game.result:
+            instr = self.font_small.render("Arrow keys to move, SPACE to drop", True, PALETTE['cream'])
+            panel.blit(instr, instr.get_rect(centerx=panel_w // 2, y=330))
+        else:
+            # Dark overlay for result
+            overlay = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 180))
+            panel.blit(overlay, (0, 0))
+
+            if self.claw_game.result == "win":
+                result_text = "SUCCESS!"
+                result_color = PALETTE['gold']
+                result_surf = self.font_large.render(result_text, True, result_color)
+                panel.blit(result_surf, result_surf.get_rect(center=(panel_w // 2, panel_h // 2 - 40)))
+
+                reward_text = self.font_medium.render("You grabbed a prize!", True, (255, 255, 255))
+                panel.blit(reward_text, reward_text.get_rect(center=(panel_w // 2, panel_h // 2)))
+
+                hint_text = self.font_small.render("Nice grab!", True, PALETTE['gold'])
+                panel.blit(hint_text, hint_text.get_rect(center=(panel_w // 2, panel_h // 2 + 30)))
+            else:
+                result_text = "MISSED!"
+                result_color = PALETTE['red']
+                result_surf = self.font_large.render(result_text, True, result_color)
+                panel.blit(result_surf, result_surf.get_rect(center=(panel_w // 2, panel_h // 2 - 40)))
+
+                fail_text = self.font_medium.render("The prize slipped away...", True, PALETTE['gray_light'])
+                panel.blit(fail_text, fail_text.get_rect(center=(panel_w // 2, panel_h // 2)))
+
+                hint_text = self.font_small.render("Better luck next time!", True, PALETTE['gray_light'])
+                panel.blit(hint_text, hint_text.get_rect(center=(panel_w // 2, panel_h // 2 + 30)))
+
+        self.screen.blit(panel, (panel_x, panel_y))
+
+    def _draw_flappy_minigame(self) -> None:
+        """Draw the flappy bird minigame."""
+        panel_w, panel_h = 450, 350
+        panel_x = self.WINDOW_WIDTH - panel_w - 20
+        panel_y = 170
+
+        panel = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+
+        # Sky gradient
+        for y in range(panel_h):
+            t = y / panel_h
+            color = (int(50 + 30 * t), int(80 + 40 * t), int(140 - 40 * t))
+            pygame.draw.line(panel, color, (0, y), (panel_w, y))
+
+        pygame.draw.rect(panel, PALETTE['green'], (0, 0, panel_w, panel_h), 3, border_radius=8)
+
+        # Draw obstacles (pipes)
+        for obs in self.flappy_game.obstacles:
+            x, gap_y, gap_h = obs
+            if -50 < x < panel_w + 50:
+                pipe_x = int(x)
+                gap_top = int(gap_y - gap_h / 2)
+                gap_bottom = int(gap_y + gap_h / 2)
+                # Top pipe
+                pygame.draw.rect(panel, (50, 180, 80), (pipe_x - 25, 0, 50, gap_top))
+                pygame.draw.rect(panel, (30, 140, 60), (pipe_x - 30, gap_top - 15, 60, 15))
+                # Bottom pipe
+                pygame.draw.rect(panel, (50, 180, 80), (pipe_x - 25, gap_bottom, 50, panel_h - gap_bottom))
+                pygame.draw.rect(panel, (30, 140, 60), (pipe_x - 30, gap_bottom, 60, 15))
+
+        # Draw coins
+        for coin in self.flappy_game.coins:
+            x, y, collected = coin
+            if not collected and -20 < x < panel_w + 20:
+                pygame.draw.circle(panel, PALETTE['gold'], (int(x), int(y)), 10)
+                pygame.draw.circle(panel, (255, 230, 100), (int(x) - 2, int(y) - 2), 4)
+
+        # Draw bird
+        bird_x = 80
+        bird_y = int(self.flappy_game.bird_y)
+        # Body
+        pygame.draw.circle(panel, PALETTE['gold'], (bird_x, bird_y), 16)
+        pygame.draw.circle(panel, (255, 230, 100), (bird_x, bird_y), 16, 2)
+        # Eye
+        pygame.draw.circle(panel, (255, 255, 255), (bird_x + 6, bird_y - 4), 6)
+        pygame.draw.circle(panel, (0, 0, 0), (bird_x + 7, bird_y - 4), 3)
+        # Beak
+        pygame.draw.polygon(panel, (255, 150, 50), [(bird_x + 14, bird_y), (bird_x + 26, bird_y + 2), (bird_x + 14, bird_y + 6)])
+        # Wing
+        wing_offset = int(math.sin(self.flappy_game.game_timer * 15) * 4)
+        pygame.draw.ellipse(panel, (200, 160, 50), (bird_x - 12, bird_y - 2 + wing_offset, 16, 10))
+
+        # UI
+        timer_text = f"Time: {max(0, self.flappy_game.time_limit - self.flappy_game.game_timer):.1f}s"
+        panel.blit(self.font_medium.render(timer_text, True, (255, 255, 255)), (15, 15))
+
+        coins_text = f"Coins: {self.flappy_game.coins_collected}/{self.flappy_game.coins_needed}"
+        panel.blit(self.font_medium.render(coins_text, True, PALETTE['gold']), (panel_w - 110, 15))
+
+        # Grace period, instructions, or result
+        if self.flappy_game.grace_period > 0 and not self.flappy_game.result:
+            # Show "GET READY!" during grace period
+            overlay = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 100))
+            panel.blit(overlay, (0, 0))
+            ready_text = self.font_large.render("GET READY!", True, PALETTE['gold'])
+            panel.blit(ready_text, ready_text.get_rect(center=(panel_w // 2, panel_h // 2 - 20)))
+            hint_text = self.font_small.render("Press SPACE to flap and collect coins!", True, (255, 255, 255))
+            panel.blit(hint_text, hint_text.get_rect(center=(panel_w // 2, panel_h // 2 + 20)))
+        elif not self.flappy_game.result:
+            instr = self.font_small.render("SPACE to flap! Collect coins!", True, (255, 255, 255))
+            panel.blit(instr, instr.get_rect(centerx=panel_w // 2, bottom=panel_h - 10))
+        else:
+            # Dark overlay for results
+            overlay = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 180))
+            panel.blit(overlay, (0, 0))
+
+            if self.flappy_game.result == "win":
+                # Victory screen
+                result_text = "SUCCESS!"
+                result_color = PALETTE['gold']
+                result_surf = self.font_large.render(result_text, True, result_color)
+                panel.blit(result_surf, result_surf.get_rect(center=(panel_w // 2, panel_h // 2 - 40)))
+
+                reward_text = self.font_medium.render("You won a rare item!", True, (255, 255, 255))
+                panel.blit(reward_text, reward_text.get_rect(center=(panel_w // 2, panel_h // 2)))
+
+                coins_final = self.font_small.render(f"Coins collected: {self.flappy_game.coins_collected}/{self.flappy_game.coins_needed}", True, PALETTE['gold'])
+                panel.blit(coins_final, coins_final.get_rect(center=(panel_w // 2, panel_h // 2 + 30)))
+            else:
+                # Loss screen
+                result_text = "GAME OVER"
+                result_color = PALETTE['red']
+                result_surf = self.font_large.render(result_text, True, result_color)
+                panel.blit(result_surf, result_surf.get_rect(center=(panel_w // 2, panel_h // 2 - 40)))
+
+                fail_text = self.font_medium.render("No reward this time...", True, PALETTE['gray_light'])
+                panel.blit(fail_text, fail_text.get_rect(center=(panel_w // 2, panel_h // 2)))
+
+                coins_final = self.font_small.render(f"Coins collected: {self.flappy_game.coins_collected}/{self.flappy_game.coins_needed}", True, PALETTE['gray_light'])
+                panel.blit(coins_final, coins_final.get_rect(center=(panel_w // 2, panel_h // 2 + 30)))
+
+        self.screen.blit(panel, (panel_x, panel_y))
+
+    def _draw_archery_minigame(self) -> None:
+        """Draw the archery target shooting minigame."""
+        import math
+
+        panel_w, panel_h = 450, 350
+        panel_x = self.WINDOW_WIDTH - panel_w - 20
+        panel_y = 170
+
+        panel = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+        game = self.archery_game
+
+        # Background - outdoor range
+        for y in range(panel_h):
+            t = y / panel_h
+            if t < 0.6:  # Sky
+                color = (int(100 + 50 * t), int(150 + 30 * t), int(200 - 20 * t))
+            else:  # Ground
+                color = (int(80 + 20 * (t - 0.6)), int(120 + 30 * (t - 0.6)), int(60))
+            pygame.draw.line(panel, color, (0, y), (panel_w, y))
+
+        pygame.draw.rect(panel, (139, 90, 43), (0, 0, panel_w, panel_h), 3, border_radius=8)
+
+        # Draw target
+        target_x = int(game.target_x)
+        target_y = int(game.target_y)
+
+        # Target stand
+        pygame.draw.rect(panel, (100, 70, 40), (target_x - 5, target_y + 50, 10, 60))
+
+        # Target rings (from outside in)
+        for i, (radius, color) in enumerate([
+            (50, (255, 255, 255)),   # White outer
+            (40, (50, 50, 50)),      # Black
+            (30, (100, 150, 255)),   # Blue
+            (20, (255, 50, 50)),     # Red
+            (12, (255, 215, 0)),     # Gold bullseye
+        ]):
+            pygame.draw.circle(panel, color, (target_x, target_y), radius)
+
+        # Draw wind indicator if there's wind
+        if abs(game.wind_strength) > 5:
+            wind_text = f"Wind: {'↑' if game.wind_strength < 0 else '↓'} {abs(int(game.wind_strength))}"
+            wind_color = (200, 200, 255) if game.wind_strength < 0 else (255, 200, 200)
+            panel.blit(self.font_small.render(wind_text, True, wind_color), (panel_w - 100, 40))
+
+        # Draw bow
+        bow_x = 50
+        bow_y = int(game.bow_y)
+        angle_rad = math.radians(game.aim_angle)
+
+        # Bow body (curved arc)
+        bow_color = (139, 90, 43)  # Brown wood
+        pygame.draw.arc(panel, bow_color, (bow_x - 20, bow_y - 40, 25, 80),
+                       math.pi/2 - 0.5, math.pi/2 + 0.5, 4)
+
+        # Bow string
+        string_top = (bow_x - 8, bow_y - 35)
+        string_bottom = (bow_x - 8, bow_y + 35)
+        string_pull = (bow_x - 8 - int(game.power * 15), bow_y)
+        pygame.draw.line(panel, (200, 200, 200), string_top, string_pull, 2)
+        pygame.draw.line(panel, (200, 200, 200), string_pull, string_bottom, 2)
+
+        # Arrow on bow (if not flying)
+        if not game.arrow_flying and game.shots_taken < game.shots_allowed:
+            arrow_start_x = bow_x - 5 - int(game.power * 15)
+            arrow_start_y = bow_y
+            arrow_len = 40
+            arrow_end_x = arrow_start_x + int(arrow_len * math.cos(angle_rad))
+            arrow_end_y = arrow_start_y + int(arrow_len * math.sin(angle_rad))
+
+            # Arrow shaft
+            pygame.draw.line(panel, (139, 90, 43), (arrow_start_x, arrow_start_y),
+                           (arrow_end_x, arrow_end_y), 3)
+            # Arrow head
+            head_x = arrow_end_x + int(8 * math.cos(angle_rad))
+            head_y = arrow_end_y + int(8 * math.sin(angle_rad))
+            pygame.draw.polygon(panel, (150, 150, 150), [
+                (arrow_end_x, arrow_end_y),
+                (head_x, head_y),
+                (arrow_end_x + int(5 * math.cos(angle_rad + 2.5)), arrow_end_y + int(5 * math.sin(angle_rad + 2.5))),
+            ])
+
+        # Draw flying arrow
+        if game.arrow_flying:
+            ax, ay = int(game.arrow_x), int(game.arrow_y)
+            # Calculate arrow angle from velocity
+            flight_angle = math.atan2(game.arrow_vy, game.arrow_vx)
+            arrow_len = 35
+            tail_x = ax - int(arrow_len * math.cos(flight_angle))
+            tail_y = ay - int(arrow_len * math.sin(flight_angle))
+
+            # Arrow shaft
+            pygame.draw.line(panel, (139, 90, 43), (tail_x, tail_y), (ax, ay), 3)
+            # Arrow head
+            head_x = ax + int(8 * math.cos(flight_angle))
+            head_y = ay + int(8 * math.sin(flight_angle))
+            pygame.draw.polygon(panel, (150, 150, 150), [
+                (ax, ay),
+                (head_x, head_y),
+                (ax + int(5 * math.cos(flight_angle + 2.5)), ay + int(5 * math.sin(flight_angle + 2.5))),
+            ])
+            # Fletching
+            pygame.draw.line(panel, (200, 50, 50),
+                           (tail_x, tail_y),
+                           (tail_x - int(8 * math.cos(flight_angle - 0.5)), tail_y - int(8 * math.sin(flight_angle - 0.5))), 2)
+            pygame.draw.line(panel, (200, 50, 50),
+                           (tail_x, tail_y),
+                           (tail_x - int(8 * math.cos(flight_angle + 0.5)), tail_y - int(8 * math.sin(flight_angle + 0.5))), 2)
+
+        # Power meter
+        meter_x, meter_y = 15, 80
+        meter_w, meter_h = 15, 180
+        pygame.draw.rect(panel, (50, 50, 50), (meter_x, meter_y, meter_w, meter_h), border_radius=4)
+        pygame.draw.rect(panel, (100, 100, 100), (meter_x, meter_y, meter_w, meter_h), 2, border_radius=4)
+
+        # Power fill
+        fill_h = int(meter_h * game.power)
+        fill_color = (100, 255, 100) if game.power < 0.7 else (255, 200, 50) if game.power < 0.9 else (255, 100, 100)
+        if fill_h > 0:
+            pygame.draw.rect(panel, fill_color, (meter_x + 2, meter_y + meter_h - fill_h, meter_w - 4, fill_h), border_radius=2)
+
+        power_label = self.font_tiny.render("PWR", True, (200, 200, 200))
+        panel.blit(power_label, (meter_x - 2, meter_y + meter_h + 5))
+
+        # UI - Shots and bullseyes
+        shots_text = f"Shots: {game.shots_allowed - game.shots_taken}"
+        panel.blit(self.font_medium.render(shots_text, True, (255, 255, 255)), (15, 15))
+
+        bullseye_text = f"Bullseyes: {game.bullseyes}/{game.bullseyes_needed}"
+        bullseye_color = PALETTE['gold'] if game.bullseyes >= game.bullseyes_needed else (255, 255, 255)
+        panel.blit(self.font_medium.render(bullseye_text, True, bullseye_color), (panel_w - 140, 15))
+
+        score_text = f"Score: {game.score}"
+        panel.blit(self.font_small.render(score_text, True, PALETTE['gold']), (panel_w // 2 - 30, 15))
+
+        # Last hit feedback
+        if game.last_hit_timer > 0 and game.last_hit_text:
+            alpha = min(255, int(game.last_hit_timer * 255))
+            hit_color = PALETTE['gold'] if "BULLSEYE" in game.last_hit_text else PALETTE['green'] if "GOOD" in game.last_hit_text else PALETTE['red'] if "MISS" in game.last_hit_text else (200, 200, 200)
+            hit_surf = self.font_large.render(game.last_hit_text, True, hit_color)
+            hit_surf.set_alpha(alpha)
+            panel.blit(hit_surf, hit_surf.get_rect(centerx=panel_w // 2, y=panel_h // 2 - 60))
+
+        # Grace period, instructions, or result
+        if game.grace_period > 0 and not game.result:
+            overlay = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 100))
+            panel.blit(overlay, (0, 0))
+            ready_text = self.font_large.render("GET READY!", True, PALETTE['gold'])
+            panel.blit(ready_text, ready_text.get_rect(center=(panel_w // 2, panel_h // 2 - 20)))
+            hint_text = self.font_small.render("UP/DOWN to aim, SPACE to shoot!", True, (255, 255, 255))
+            panel.blit(hint_text, hint_text.get_rect(center=(panel_w // 2, panel_h // 2 + 20)))
+        elif not game.result:
+            instr = self.font_small.render("UP/DOWN to aim, SPACE to shoot!", True, (255, 255, 255))
+            panel.blit(instr, instr.get_rect(centerx=panel_w // 2, bottom=panel_h - 10))
+        else:
+            # Result overlay
+            overlay = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 180))
+            panel.blit(overlay, (0, 0))
+
+            if game.result == "win":
+                result_text = "VICTORY!"
+                result_color = PALETTE['gold']
+                result_surf = self.font_large.render(result_text, True, result_color)
+                panel.blit(result_surf, result_surf.get_rect(center=(panel_w // 2, panel_h // 2 - 40)))
+
+                reward_text = self.font_medium.render("You won a rare item!", True, (255, 255, 255))
+                panel.blit(reward_text, reward_text.get_rect(center=(panel_w // 2, panel_h // 2)))
+
+                score_final = self.font_small.render(f"Final Score: {game.score} | Bullseyes: {game.bullseyes}", True, PALETTE['gold'])
+                panel.blit(score_final, score_final.get_rect(center=(panel_w // 2, panel_h // 2 + 30)))
+            else:
+                result_text = "OUT OF ARROWS"
+                result_color = PALETTE['red']
+                result_surf = self.font_large.render(result_text, True, result_color)
+                panel.blit(result_surf, result_surf.get_rect(center=(panel_w // 2, panel_h // 2 - 40)))
+
+                fail_text = self.font_medium.render("No reward this time...", True, PALETTE['gray_light'])
+                panel.blit(fail_text, fail_text.get_rect(center=(panel_w // 2, panel_h // 2)))
+
+                score_final = self.font_small.render(f"Score: {game.score} | Bullseyes: {game.bullseyes}/{game.bullseyes_needed}", True, PALETTE['gray_light'])
+                panel.blit(score_final, score_final.get_rect(center=(panel_w // 2, panel_h // 2 + 30)))
+
+        self.screen.blit(panel, (panel_x, panel_y))
+
+    def _draw_blacksmith_minigame(self) -> None:
+        """Draw the blacksmith gamble minigame."""
+        import math
+
+        panel_w, panel_h = 450, 350
+        panel_x = self.WINDOW_WIDTH - panel_w - 20
+        panel_y = 170
+
+        panel = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+        game = self.blacksmith_game
+
+        # Background - forge/workshop
+        for y in range(panel_h):
+            t = y / panel_h
+            color = (int(40 + 20 * t), int(30 + 15 * t), int(25 + 10 * t))
+            pygame.draw.line(panel, color, (0, y), (panel_w, y))
+
+        pygame.draw.rect(panel, (100, 60, 30), (0, 0, panel_w, panel_h), 3, border_radius=8)
+
+        # Draw anvil
+        anvil_x, anvil_y = panel_w // 2, 220
+        pygame.draw.rect(panel, (60, 60, 70), (anvil_x - 50, anvil_y, 100, 30), border_radius=3)  # Top
+        pygame.draw.rect(panel, (50, 50, 60), (anvil_x - 35, anvil_y + 30, 70, 40))  # Base
+        pygame.draw.rect(panel, (70, 70, 80), (anvil_x - 55, anvil_y - 5, 110, 10), border_radius=2)  # Rim
+
+        # Draw hammer (animated during rolling)
+        hammer_x = anvil_x + 80
+        hammer_y = anvil_y - 40
+        if game.is_rolling:
+            # Hammer animation
+            swing = math.sin(game.roll_timer * 15) * 30
+            hammer_y += int(abs(swing))
+            if abs(swing) < 5:  # Hitting sound moment
+                # Add sparks
+                if random.random() < 0.3:
+                    self._add_particles(panel_x + anvil_x, panel_y + anvil_y - 10, (255, 200, 100), 3)
+
+        # Hammer handle
+        pygame.draw.line(panel, (100, 70, 40), (hammer_x, hammer_y + 40), (hammer_x, hammer_y), 6)
+        # Hammer head
+        pygame.draw.rect(panel, (80, 80, 90), (hammer_x - 15, hammer_y - 10, 30, 20), border_radius=3)
+
+        # Draw sparks animation on anvil
+        if game.is_rolling or (game.sparks_timer % 2 < 0.1):
+            spark_count = 5 if game.is_rolling else 2
+            for _ in range(spark_count):
+                sx = anvil_x + random.randint(-30, 30)
+                sy = anvil_y - 10 + random.randint(-20, 0)
+                pygame.draw.circle(panel, (255, 200 + random.randint(0, 55), 50), (sx, sy), random.randint(1, 3))
+
+        # Draw item being forged (centered above anvil)
+        item_y = anvil_y - 50
+        rarity_colors = [
+            (180, 180, 180),  # Common - gray
+            (100, 200, 100),  # Uncommon - green
+            (100, 150, 255),  # Rare - blue
+            (200, 100, 255),  # Epic - purple
+            (255, 200, 50),   # Legendary - gold
+        ]
+        item_color = rarity_colors[min(game.current_rarity, 4)]
+        rarity_name = game.rarity_names[min(game.current_rarity, 4)]
+
+        # Item glow
+        glow_size = 35 + int(math.sin(game.sparks_timer * 3) * 5)
+        glow_surf = pygame.Surface((glow_size * 2, glow_size * 2), pygame.SRCALPHA)
+        pygame.draw.circle(glow_surf, (*item_color, 50), (glow_size, glow_size), glow_size)
+        panel.blit(glow_surf, (anvil_x - glow_size, item_y - glow_size))
+
+        # Item (sword shape)
+        pygame.draw.rect(panel, item_color, (anvil_x - 5, item_y - 40, 10, 60), border_radius=2)  # Blade
+        pygame.draw.rect(panel, (100, 70, 40), (anvil_x - 15, item_y + 15, 30, 8), border_radius=2)  # Guard
+        pygame.draw.rect(panel, (80, 60, 40), (anvil_x - 4, item_y + 23, 8, 15))  # Handle
+
+        # Rarity label
+        rarity_text = self.font_medium.render(rarity_name, True, item_color)
+        panel.blit(rarity_text, rarity_text.get_rect(centerx=panel_w // 2, y=item_y + 45))
+
+        # Title
+        title = self.font_large.render("BLACKSMITH'S GAMBLE", True, (255, 200, 100))
+        panel.blit(title, title.get_rect(centerx=panel_w // 2, y=10))
+
+        # Upgrade chances display
+        chances_y = 300
+        for i in range(3):
+            chance = int(game.success_chances[i] * 100)
+            if i < game.upgrade_level:
+                # Already passed
+                color = PALETTE['green']
+                status = "DONE"
+            elif i == game.upgrade_level:
+                # Current attempt
+                color = PALETTE['gold']
+                status = f"{chance}%"
+            else:
+                # Future
+                color = PALETTE['gray_light']
+                status = f"{chance}%"
+
+            x_pos = 80 + i * 130
+            pygame.draw.rect(panel, color, (x_pos - 30, chances_y, 80, 25), border_radius=4)
+            chance_text = self.font_small.render(status, True, (0, 0, 0))
+            panel.blit(chance_text, chance_text.get_rect(centerx=x_pos + 10, centery=chances_y + 12))
+
+        # Rolling animation overlay
+        if game.is_rolling:
+            # Pulsing overlay
+            pulse = int(abs(math.sin(game.roll_timer * 8)) * 50)
+            overlay = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+            overlay.fill((255, 200, 100, pulse))
+            panel.blit(overlay, (0, 0))
+
+            forging_text = self.font_large.render("FORGING...", True, (255, 200, 100))
+            panel.blit(forging_text, forging_text.get_rect(centerx=panel_w // 2, y=130))
+
+        # Grace period, instructions, or result
+        if game.grace_period > 0 and not game.result:
+            overlay = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 120))
+            panel.blit(overlay, (0, 0))
+            ready_text = self.font_large.render("BLACKSMITH'S GAMBLE", True, PALETTE['gold'])
+            panel.blit(ready_text, ready_text.get_rect(center=(panel_w // 2, panel_h // 2 - 30)))
+            hint1 = self.font_small.render("SPACE/UP = Upgrade (risk breaking)", True, (255, 255, 255))
+            panel.blit(hint1, hint1.get_rect(center=(panel_w // 2, panel_h // 2 + 10)))
+            hint2 = self.font_small.render("DOWN/ESC = Keep current item", True, (200, 200, 200))
+            panel.blit(hint2, hint2.get_rect(center=(panel_w // 2, panel_h // 2 + 35)))
+        elif not game.result and not game.is_rolling:
+            instr1 = self.font_small.render("SPACE = Upgrade | DOWN = Keep", True, (200, 200, 200))
+            panel.blit(instr1, instr1.get_rect(centerx=panel_w // 2, bottom=panel_h - 10))
+        elif game.result:
+            # Result overlay
+            overlay = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 180))
+            panel.blit(overlay, (0, 0))
+
+            if game.result == "win":
+                result_text = "FORGING COMPLETE!"
+                result_color = PALETTE['gold']
+                result_surf = self.font_large.render(result_text, True, result_color)
+                panel.blit(result_surf, result_surf.get_rect(center=(panel_w // 2, panel_h // 2 - 40)))
+
+                final_rarity = game.rarity_names[min(game.current_rarity, 4)]
+                reward_text = self.font_medium.render(f"You forged a {final_rarity} item!", True, item_color)
+                panel.blit(reward_text, reward_text.get_rect(center=(panel_w // 2, panel_h // 2)))
+
+                upgrades_text = self.font_small.render(f"Upgrades completed: {game.upgrade_level}", True, PALETTE['gold'])
+                panel.blit(upgrades_text, upgrades_text.get_rect(center=(panel_w // 2, panel_h // 2 + 30)))
+            else:
+                result_text = "ITEM SHATTERED!"
+                result_color = PALETTE['red']
+                result_surf = self.font_large.render(result_text, True, result_color)
+                panel.blit(result_surf, result_surf.get_rect(center=(panel_w // 2, panel_h // 2 - 40)))
+
+                fail_text = self.font_medium.render("The forge was too hot...", True, PALETTE['gray_light'])
+                panel.blit(fail_text, fail_text.get_rect(center=(panel_w // 2, panel_h // 2)))
+
+                hint_text = self.font_small.render("No reward this time.", True, PALETTE['gray_light'])
+                panel.blit(hint_text, hint_text.get_rect(center=(panel_w // 2, panel_h // 2 + 30)))
+
+        self.screen.blit(panel, (panel_x, panel_y))
+
+    def _draw_boss_cinematic(self) -> None:
+        """Draw the epic boss introduction cinematic."""
+        import math
+        cine = self.boss_cinematic
+
+        # Create full screen overlay
+        overlay = pygame.Surface((self.WINDOW_WIDTH, self.WINDOW_HEIGHT), pygame.SRCALPHA)
+
+        # Dark cinematic bars at top and bottom
+        bar_height = 60
+        pygame.draw.rect(overlay, (0, 0, 0, 255), (0, 0, self.WINDOW_WIDTH, bar_height))
+        pygame.draw.rect(overlay, (0, 0, 0, 255), (0, self.WINDOW_HEIGHT - bar_height, self.WINDOW_WIDTH, bar_height))
+
+        # Semi-transparent dark overlay on game area
+        if cine.phase == "transition":
+            # Full black during transition
+            alpha = min(255, int(255 * (cine.timer / 0.5)))
+            overlay.fill((0, 0, 0, alpha))
+        else:
+            pygame.draw.rect(overlay, (0, 0, 0, 100),
+                           (0, bar_height, self.WINDOW_WIDTH, self.WINDOW_HEIGHT - bar_height * 2))
+
+        # Screen flash effect
+        if cine.screen_flash > 0:
+            flash_alpha = int(200 * cine.screen_flash)
+            flash = pygame.Surface((self.WINDOW_WIDTH, self.WINDOW_HEIGHT), pygame.SRCALPHA)
+            flash.fill((255, 255, 200, flash_alpha))
+            overlay.blit(flash, (0, 0))
+
+        # Calculate dragon position on screen
+        # Board area is roughly left side of screen
+        board_center_x = 30 + self.BOARD_SIZE // 2
+        board_center_y = 150 + self.BOARD_SIZE // 2
+
+        # Dragon position based on cinematic phase
+        dragon_size = int(150 * cine.dragon_scale)
+        dragon_x = int(board_center_x + (cine.dragon_x - 0.5) * self.BOARD_SIZE * 2) - dragon_size // 2
+        dragon_y = board_center_y - dragon_size // 2
+
+        # Only draw dragon if not in transition phase and on screen
+        if cine.phase != "transition" and dragon_x < self.WINDOW_WIDTH + 100:
+            # Get dragon sprite
+            dragon_sprite = sprites.create_monster_sprite("dragon", dragon_size, is_boss=True)
+
+            # Add screen shake to dragon position
+            shake_x = int(random.uniform(-5, 5) * cine.screen_shake * 10) if cine.screen_shake > 0 else 0
+            shake_y = int(random.uniform(-5, 5) * cine.screen_shake * 10) if cine.screen_shake > 0 else 0
+
+            # Breathing/hovering animation
+            hover_offset = int(math.sin(cine.timer * 3) * 8)
+
+            overlay.blit(dragon_sprite, (dragon_x + shake_x, dragon_y + shake_y + hover_offset))
+
+            # Draw fire particles during awaken phase
+            if cine.phase == "awaken" and cine.timer > 0.5:
+                for _ in range(3):
+                    px = dragon_x + dragon_size // 2 + random.randint(-30, 30)
+                    py = dragon_y + dragon_size // 2 + random.randint(-20, 20)
+                    size = random.randint(3, 8)
+                    color = random.choice([PALETTE['red'], PALETTE['gold'], (255, 150, 50)])
+                    pygame.draw.circle(overlay, color, (px + shake_x, py + shake_y), size)
+
+        # Draw speech bubble during speech phase
+        if cine.phase == "speech" and cine.speech_text:
+            bubble_w = 400
+            bubble_h = 80
+            bubble_x = self.WINDOW_WIDTH // 2 - bubble_w // 2
+            bubble_y = self.WINDOW_HEIGHT - bar_height - bubble_h - 40
+
+            # Speech bubble background
+            pygame.draw.rect(overlay, (30, 30, 40, 240), (bubble_x, bubble_y, bubble_w, bubble_h), border_radius=10)
+            pygame.draw.rect(overlay, PALETTE['gold'], (bubble_x, bubble_y, bubble_w, bubble_h), 3, border_radius=10)
+
+            # Dragon name
+            name_text = self.font_medium.render("Ancient Dragon", True, PALETTE['red'])
+            overlay.blit(name_text, (bubble_x + 15, bubble_y + 10))
+
+            # Speech text (typewriter effect)
+            chars_shown = min(len(cine.speech_text), int(cine.timer * 30))
+            displayed_text = cine.speech_text[:chars_shown]
+            speech_surf = self.font_medium.render(displayed_text, True, (255, 255, 255))
+            overlay.blit(speech_surf, (bubble_x + 15, bubble_y + 40))
+
+        # Phase indicator text
+        if cine.phase == "awaken":
+            phase_text = "THE DRAGON AWAKENS!"
+            text_color = PALETTE['red']
+        elif cine.phase == "exit":
+            phase_text = "PREPARE FOR BATTLE!"
+            text_color = PALETTE['gold']
+        else:
+            phase_text = ""
+            text_color = PALETTE['cream']
+
+        if phase_text:
+            # Pulsing text effect
+            pulse = 1.0 + math.sin(cine.timer * 5) * 0.1
+            text_surf = self.font_large.render(phase_text, True, text_color)
+            text_rect = text_surf.get_rect(center=(self.WINDOW_WIDTH // 2, bar_height + 40))
+            overlay.blit(text_surf, text_rect)
+
+        self.screen.blit(overlay, (0, 0))
+
+    def _draw_monster_minigame(self) -> None:
+        """Draw the monster attack minigame - arrow sequence survival."""
+        import math
+
+        panel_w, panel_h = 450, 350
+        panel_x = self.WINDOW_WIDTH - panel_w - 20
+        panel_y = 170
+
+        panel = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+        game = self.monster_game
+
+        # Ominous dark background
+        for y in range(panel_h):
+            t = y / panel_h
+            color = (int(30 + 10 * t), int(15 + 10 * t), int(40 + 15 * t))
+            pygame.draw.line(panel, color, (0, y), (panel_w, y))
+
+        pygame.draw.rect(panel, PALETTE['red'], (0, 0, panel_w, panel_h), 3, border_radius=8)
+
+        # Monster name title
+        title = self.font_large.render(game.monster_name.upper(), True, PALETTE['red'])
+        panel.blit(title, title.get_rect(centerx=panel_w // 2, y=10))
+
+        # Round indicator
+        round_text = f"Round {game.current_round} / {game.max_rounds}"
+        round_surf = self.font_medium.render(round_text, True, PALETTE['gold'])
+        panel.blit(round_surf, round_surf.get_rect(centerx=panel_w // 2, y=45))
+
+        # Arrow display area
+        arrow_area_y = 90
+        arrow_size = 40
+        arrow_colors = {
+            "up": PALETTE['cyan'],
+            "down": PALETTE['green'],
+            "left": PALETTE['gold'],
+            "right": PALETTE['purple'],
+        }
+        arrow_symbols = {"up": "^", "down": "v", "left": "<", "right": ">"}
+
+        if game.grace_period > 0 and not game.result:
+            # Grace period - GET READY
+            overlay = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 120))
+            panel.blit(overlay, (0, 0))
+            ready_text = self.font_large.render("INCOMING ATTACK!", True, PALETTE['red'])
+            panel.blit(ready_text, ready_text.get_rect(center=(panel_w // 2, panel_h // 2 - 30)))
+            attack_text = self.font_medium.render(f"{game.attack_name}!", True, PALETTE['gold'])
+            panel.blit(attack_text, attack_text.get_rect(center=(panel_w // 2, panel_h // 2 + 10)))
+            hint_text = self.font_small.render("Match the arrow sequence to survive!", True, (255, 255, 255))
+            panel.blit(hint_text, hint_text.get_rect(center=(panel_w // 2, panel_h // 2 + 45)))
+
+        elif not game.result:
+            # Input phase - show sequence and player progress
+            # Timer bar
+            timer_w = panel_w - 80
+            timer_h = 12
+            timer_x = 40
+            timer_y = arrow_area_y
+
+            timer_pct = max(0, game.round_timer / game.round_time_limit)
+            timer_color = PALETTE['green'] if timer_pct > 0.5 else PALETTE['gold'] if timer_pct > 0.25 else PALETTE['red']
+
+            pygame.draw.rect(panel, (40, 40, 50), (timer_x, timer_y, timer_w, timer_h), border_radius=4)
+            if timer_pct > 0:
+                pygame.draw.rect(panel, timer_color, (timer_x, timer_y, int(timer_w * timer_pct), timer_h), border_radius=4)
+            pygame.draw.rect(panel, PALETTE['gray_light'], (timer_x, timer_y, timer_w, timer_h), 1, border_radius=4)
+
+            time_text = f"{game.round_timer:.1f}s"
+            time_surf = self.font_small.render(time_text, True, timer_color)
+            panel.blit(time_surf, time_surf.get_rect(right=timer_x + timer_w, y=timer_y - 18))
+
+            # Draw sequence with player progress highlighted
+            seq_label = self.font_medium.render("INPUT:", True, PALETTE['cyan'])
+            panel.blit(seq_label, seq_label.get_rect(centerx=panel_w // 2, y=timer_y + 25))
+
+            max_per_row = 10
+            rows = (len(game.sequence) + max_per_row - 1) // max_per_row
+
+            for row in range(rows):
+                start_idx = row * max_per_row
+                end_idx = min(start_idx + max_per_row, len(game.sequence))
+                row_arrows = game.sequence[start_idx:end_idx]
+                row_width = len(row_arrows) * (arrow_size + 5)
+                start_x = (panel_w - row_width) // 2
+                row_y = timer_y + 55 + row * (arrow_size + 10)
+
+                for i, arrow in enumerate(row_arrows):
+                    idx = start_idx + i
+                    x = start_x + i * (arrow_size + 5)
+
+                    # Color based on status
+                    if idx < game.player_index:
+                        # Completed
+                        color = PALETTE['green']
+                        alpha = 200
+                    elif idx == game.player_index:
+                        # Current - highlight
+                        color = arrow_colors.get(arrow, PALETTE['gray'])
+                        alpha = 255
+                        # Pulsing border
+                        pulse = 150 + int(abs(math.sin(game.round_timer * 8)) * 105)
+                        pygame.draw.rect(panel, (pulse, pulse, pulse), (x - 2, row_y - 2, arrow_size + 4, arrow_size + 4), 2, border_radius=4)
+                    else:
+                        # Future
+                        color = (50, 50, 60)
+                        alpha = 120
+
+                    # Flash on input
+                    if idx == game.player_index and game.input_flash_timer > 0:
+                        if game.last_input_correct:
+                            color = (100, 255, 100)
+                        else:
+                            color = (255, 100, 100)
+
+                    arrow_surf = pygame.Surface((arrow_size, arrow_size), pygame.SRCALPHA)
+                    pygame.draw.rect(arrow_surf, (*color[:3], alpha), (0, 0, arrow_size, arrow_size), border_radius=4)
+                    symbol = arrow_symbols.get(arrow, "?")
+                    sym_surf = self.font_large.render(symbol, True, (255, 255, 255))
+                    arrow_surf.blit(sym_surf, sym_surf.get_rect(center=(arrow_size // 2, arrow_size // 2)))
+                    panel.blit(arrow_surf, (x, row_y))
+
+            # Progress text
+            progress_text = f"{game.player_index} / {len(game.sequence)}"
+            prog_surf = self.font_medium.render(progress_text, True, PALETTE['gold'])
+            panel.blit(prog_surf, prog_surf.get_rect(centerx=panel_w // 2, y=panel_h - 50))
+
+            # Controls hint
+            hint = self.font_small.render("Arrow keys or WASD to input!", True, PALETTE['gray_light'])
+            panel.blit(hint, hint.get_rect(centerx=panel_w // 2, y=panel_h - 25))
+
+        # Result overlay
+        if game.result:
+            overlay = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 180))
+            panel.blit(overlay, (0, 0))
+
+            if game.result == "win":
+                result_text = "SURVIVED!"
+                result_color = PALETTE['gold']
+                result_surf = self.font_large.render(result_text, True, result_color)
+                panel.blit(result_surf, result_surf.get_rect(center=(panel_w // 2, panel_h // 2 - 40)))
+
+                reward_text = self.font_medium.render("The creature retreats!", True, (255, 255, 255))
+                panel.blit(reward_text, reward_text.get_rect(center=(panel_w // 2, panel_h // 2)))
+
+                heal_text = self.font_small.render("+10% HP healed! Item chance!", True, PALETTE['green'])
+                panel.blit(heal_text, heal_text.get_rect(center=(panel_w // 2, panel_h // 2 + 35)))
+            else:
+                result_text = "OVERWHELMED!"
+                result_color = PALETTE['red']
+                result_surf = self.font_large.render(result_text, True, result_color)
+                panel.blit(result_surf, result_surf.get_rect(center=(panel_w // 2, panel_h // 2 - 40)))
+
+                fail_text = self.font_medium.render(f"{game.attack_name} hits you!", True, PALETTE['gray_light'])
+                panel.blit(fail_text, fail_text.get_rect(center=(panel_w // 2, panel_h // 2)))
+
+                damage_text = self.font_small.render("-30% Max HP damage!", True, PALETTE['red'])
+                panel.blit(damage_text, damage_text.get_rect(center=(panel_w // 2, panel_h // 2 + 35)))
+
+        self.screen.blit(panel, (panel_x, panel_y))
 
     def _draw_blessings_panel(self, surface: pygame.Surface) -> None:
         """Draw active blessings panel."""
@@ -1372,6 +3865,9 @@ class GameUI:
         title = self.font_medium.render("BLESSINGS", True, PALETTE['purple_light'])
         surface.blit(title, (x + 10, y + 5))
 
+        # Clear blessing rects for hover detection
+        self.blessing_rects.clear()
+
         player = self.game.get_player_data()
         if not player or not player.active_blessings:
             none_text = self.font_small.render("(none)", True, PALETTE['gray'])
@@ -1382,7 +3878,12 @@ class GameUI:
             dur = "PERM" if blessing.is_permanent else f"({blessing.duration})"
             color = PALETTE['gold'] if blessing.is_permanent else PALETTE['cream']
             text = self.font_small.render(f"{blessing.name} {dur}", True, color)
-            surface.blit(text, (x + 15, y + 28 + i * 16))
+            text_x, text_y = x + 15, y + 28 + i * 16
+            surface.blit(text, (text_x, text_y))
+
+            # Store rect for hover detection
+            rect = pygame.Rect(text_x, text_y, w - 30, 16)
+            self.blessing_rects.append((rect, blessing))
 
     def _draw_message_log(self, surface: pygame.Surface) -> None:
         """Draw message log panel."""
@@ -1425,6 +3926,27 @@ class GameUI:
             pygame.draw.circle(surf, color, (size, size), size)
             self.screen.blit(surf, (int(p['x']) - size, int(p['y']) - size))
 
+    def _draw_floating_texts(self) -> None:
+        """Draw floating text effects."""
+        for ft in self.floating_texts:
+            alpha = int(255 * (ft['life'] / ft['max_life']))
+            color = (*ft['color'][:3],)
+
+            # Scale text based on remaining life (pop effect)
+            scale = 1.0 + (1.0 - ft['life'] / ft['max_life']) * 0.3
+
+            text_surf = self.font_large.render(ft['text'], True, color)
+            if scale != 1.0:
+                new_size = (int(text_surf.get_width() * scale), int(text_surf.get_height() * scale))
+                text_surf = pygame.transform.smoothscale(text_surf, new_size)
+
+            # Apply alpha
+            text_surf.set_alpha(alpha)
+
+            x = int(ft['x']) - text_surf.get_width() // 2
+            y = int(ft['y']) - text_surf.get_height() // 2
+            self.screen.blit(text_surf, (x, y))
+
     def _draw_item_choice(self) -> None:
         """Draw item choice panel in bottom-left corner (non-intrusive)."""
         if not self.pending_item_id:
@@ -1452,7 +3974,7 @@ class GameUI:
 
         # Item icon with rarity glow
         icon_size = 56
-        icon = sprites.create_item_icon(item.item_type, item.rarity, item.level, icon_size)
+        icon = sprites.create_item_icon(item.item_type, item.rarity, item.level, icon_size, item.theme, item.element)
         icon_x, icon_y = x + 15, y + 38
         self.screen.blit(icon, (icon_x, icon_y))
 
@@ -1487,7 +4009,7 @@ class GameUI:
             current = self.game.get_item(current_id)
             if current:
                 # Current item icon (smaller)
-                curr_icon = sprites.create_item_icon(current.item_type, current.rarity, current.level, 32)
+                curr_icon = sprites.create_item_icon(current.item_type, current.rarity, current.level, 32, current.theme, current.element)
                 self.screen.blit(curr_icon, (x + 15, compare_y))
 
                 curr_colors = RARITY_SCHEMES.get(current.rarity, RARITY_SCHEMES[Rarity.COMMON])
@@ -1603,7 +4125,7 @@ class GameUI:
                 colors = RARITY_SCHEMES.get(item.rarity, RARITY_SCHEMES[Rarity.COMMON])
 
                 # Small item icon
-                icon = sprites.create_item_icon(item.item_type, item.rarity, item.level, 24)
+                icon = sprites.create_item_icon(item.item_type, item.rarity, item.level, 24, item.theme, item.element)
                 self.screen.blit(icon, (x + 40, y + 115 + i * 28))
 
                 text = self.font_small.render(f"[{i+1}] {item.display_name} - {price}g", True, colors[0])
