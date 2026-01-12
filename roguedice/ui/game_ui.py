@@ -488,14 +488,19 @@ class GameUI:
         # MONSTER MINIGAME - Arrow sequence survival
         if self.monster_game.active:
             if not self.monster_game.result:
+                # Arrow key map for input
+                arrow_map = {
+                    pygame.K_UP: "up", pygame.K_w: "up",
+                    pygame.K_DOWN: "down", pygame.K_s: "down",
+                    pygame.K_LEFT: "left", pygame.K_a: "left",
+                    pygame.K_RIGHT: "right", pygame.K_d: "right",
+                }
+
+                # Skip grace period on any arrow key press and process input immediately
+                if self.monster_game.grace_period > 0 and event.key in arrow_map:
+                    self.monster_game.grace_period = 0
+
                 if self.monster_game.grace_period <= 0:
-                    # Only accept arrow keys during input phase
-                    arrow_map = {
-                        pygame.K_UP: "up", pygame.K_w: "up",
-                        pygame.K_DOWN: "down", pygame.K_s: "down",
-                        pygame.K_LEFT: "left", pygame.K_a: "left",
-                        pygame.K_RIGHT: "right", pygame.K_d: "right",
-                    }
                     if event.key in arrow_map:
                         pressed = arrow_map[event.key]
                         expected = self.monster_game.sequence[self.monster_game.player_index]

@@ -726,6 +726,17 @@ class CombatSystem(System):
             else:
                 damage = self._calculate_damage(monster_stats, player_stats)
 
+                # Boss special moves - get monster component to check for special moves
+                monster_comp = self.world.get_component(monster_id, MonsterComponent)
+                special_move_name = None
+                special_move_anim = None
+                if monster_comp and hasattr(monster_comp, 'special_moves') and monster_comp.special_moves:
+                    move = random.choice(monster_comp.special_moves)
+                    special_move_name = move.get('name', 'Attack')
+                    special_move_anim = move.get('animation', 'attack')
+                    damage_mult = move.get('damage_mult', 1.0)
+                    damage = int(damage * damage_mult)
+
                 # Cyberpunk: Hacked enemy deals 40% less damage
                 if theme_state.enemy_hacked:
                     damage = int(damage * 0.6)
@@ -740,10 +751,17 @@ class CombatSystem(System):
                 actual_damage = player_stats.take_damage(damage)
                 combat.damage_taken += actual_damage
 
-                combat.add_log(
-                    f"[{current_time:.1f}s] Enemy deals {actual_damage} damage! "
-                    f"(You: {player_stats.current_hp} HP)"
-                )
+                # Log with special move name if boss
+                if special_move_name:
+                    combat.add_log(
+                        f"[{current_time:.1f}s] Enemy uses {special_move_name}! {actual_damage} damage! "
+                        f"(You: {player_stats.current_hp} HP)"
+                    )
+                else:
+                    combat.add_log(
+                        f"[{current_time:.1f}s] Enemy deals {actual_damage} damage! "
+                        f"(You: {player_stats.current_hp} HP)"
+                    )
 
                 # Schedule next attack
                 attack_interval = 1.0 / max(0.1, monster_stats.attack_speed)

@@ -103,6 +103,7 @@ class MonsterFactory:
             sprite_name=template.get("sprite", "goblin"),
             drop_chance=template.get("drop_chance", 0.5),
             gold_reward=int(template.get("gold_reward", 10) * (1 + current_round * 0.2)),
+            special_moves=template.get("special_moves", []),
         )
         self.world.add_component(entity_id, monster)
 

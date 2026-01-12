@@ -24,6 +24,9 @@ class MonsterComponent(Component):
     gold_reward: int = 10
     xp_reward: int = 10
 
+    # Special moves (for bosses) - list of {name, damage_mult, animation, effect}
+    special_moves: List[Dict] = field(default_factory=list)
+
     @property
     def display_name(self) -> str:
         """Get display name with tier indicator."""

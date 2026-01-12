@@ -160,20 +160,27 @@
       "name": "Ancient Dragon",
       "tier": 10,
       "is_boss": true,
-      "base_hp": 800,
-      "base_damage": 60,
-      "attack_speed": 0.6,
+      "base_hp": 16000,
+      "base_damage": 15,
+      "attack_speed": 0.8,
       "defense": 30,
-      "crit_chance": 0.2,
-      "crit_multiplier": 2.5,
-      "true_damage": 15,
-      "life_steal": 0.1,
+      "crit_chance": 0.15,
+      "crit_multiplier": 2.0,
+      "true_damage": 5,
+      "life_steal": 0.05,
       "sprite": "dragon",
       "drop_chance": 1.0,
-      "gold_reward": 500,
+      "gold_reward": 1000,
+      "special_moves": [
+        {"name": "Fire Breath", "damage_mult": 1.5, "animation": "fire"},
+        {"name": "Tail Swipe", "damage_mult": 0.8, "animation": "swipe"},
+        {"name": "Dragon Roar", "damage_mult": 0.5, "animation": "roar", "effect": "stun"},
+        {"name": "Wing Gust", "damage_mult": 0.6, "animation": "wind"},
+        {"name": "Claw Slash", "damage_mult": 1.2, "animation": "slash"}
+      ],
       "scaling": {
-        "hp_per_round": 50,
-        "damage_per_round": 10
+        "hp_per_round": 1000,
+        "damage_per_round": 3
       }
     }
   ]
