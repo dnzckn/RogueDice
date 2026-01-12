@@ -51,7 +51,7 @@ class TurnResult:
     healed: bool = False
     heal_amount: int = 0  # Amount healed (for animations)
     monsters_spawned: List[int] = field(default_factory=list)
-    boon_spawned: Optional[int] = None  # Square index where boon (chest/blessing) spawned
+    boons_spawned: List[int] = field(default_factory=list)  # Square indices where boons spawned
     opened_merchant: bool = False
     game_over: bool = False
     victory: bool = False  # Boss defeated
@@ -215,11 +215,11 @@ class GameService:
                 result.healed = True
                 result.heal_amount = actual_heal
 
-            # Spawn 4 monsters on passing START
+            # Spawn 6-8 monsters on passing START
             result.monsters_spawned = self._spawn_monsters_on_pass_start(player.current_round)
 
-            # Spawn 1 boon (chest or blessing) on an empty space
-            result.boon_spawned = self._spawn_boon_on_pass_start()
+            # Spawn 2-3 boons (chests or blessings) on empty spaces
+            result.boons_spawned = self._spawn_boons_on_pass_start()
 
             # Check for boss spawn
             if player.current_round >= self.BOSS_SPAWN_ROUND and not player.boss_defeated:
@@ -269,7 +269,7 @@ class GameService:
 
     def _spawn_monsters_on_pass_start(self, current_round: int) -> List[int]:
         """
-        Spawn exactly 4 monsters when passing START.
+        Spawn 6-8 monsters when passing START.
         Spawns on EMPTY squares (converting them to MONSTER type).
         Can also stack on existing MONSTER squares if no EMPTY available.
         """
@@ -292,8 +292,9 @@ class GameService:
             elif square.square_type == SquareType.MONSTER:
                 monster_squares.append(square)
 
-        # Spawn 4 monsters
-        for _ in range(4):
+        # Spawn 6-8 monsters
+        num_to_spawn = random.randint(6, 8)
+        for _ in range(num_to_spawn):
             if not empty_squares and not monster_squares:
                 break  # No valid squares left
 
@@ -316,19 +317,18 @@ class GameService:
 
         return spawned_squares
 
-    def _spawn_boon_on_pass_start(self) -> Optional[int]:
+    def _spawn_boons_on_pass_start(self) -> List[int]:
         """
-        Spawn one boon (chest/item or blessing) on an empty square when passing START.
-        Returns the square index where boon spawned, or None if no space available.
+        Spawn 2-3 boons (chests/items or blessings) on empty squares when passing START.
+        Returns list of square indices where boons spawned.
         """
         player_pos = self.get_player_position()
-        corner_indices = {0, 10, 20, 30}
-        arcade_indices = {5, 15, 25, 35}
+        special_indices = {0, 5, 8, 10, 15, 18, 20, 25, 28, 30, 35, 38}
 
         # Find empty squares
         empty_squares = []
         for entity_id, square in self.world.query(BoardSquareComponent):
-            if square.index in corner_indices or square.index in arcade_indices:
+            if square.index in special_indices:
                 continue
             if square.index == player_pos:
                 continue
@@ -336,20 +336,24 @@ class GameService:
                 empty_squares.append(square)
 
         if not empty_squares:
-            return None
+            return []
 
-        # Pick a random empty square
-        square = random.choice(empty_squares)
+        # Spawn 2-3 boons
+        spawned = []
+        num_boons = min(random.randint(2, 3), len(empty_squares))
+        squares_to_use = random.sample(empty_squares, num_boons)
 
-        # 50% chance chest, 50% chance blessing
-        if random.random() < 0.5:
-            square.square_type = SquareType.ITEM
-            square.name = "Treasure"
-        else:
-            square.square_type = SquareType.BLESSING
-            square.name = "Shrine"
+        for square in squares_to_use:
+            # 50% chance chest, 50% chance blessing
+            if random.random() < 0.5:
+                square.square_type = SquareType.ITEM
+                square.name = "Treasure"
+            else:
+                square.square_type = SquareType.BLESSING
+                square.name = "Shrine"
+            spawned.append(square.index)
 
-        return square.index
+        return spawned
 
     def _force_boss_fight(
         self,

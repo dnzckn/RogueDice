@@ -837,7 +837,7 @@ class GameUI:
             wheel_speed=speed,
             is_spinning=False,
             stopped=False,
-            grace_period=1.5,
+            grace_period=0.7,
             result=None,
             result_timer=0.0,
             reward_item_id=None,
@@ -1615,7 +1615,7 @@ class GameUI:
                     self.roulette_game.grace_period -= dt
                 elif self.roulette_game.is_spinning and not self.roulette_game.stopped:
                     self.roulette_game.wheel_angle += self.roulette_game.wheel_speed * dt
-                    self.roulette_game.wheel_speed -= 2.5 * dt
+                    self.roulette_game.wheel_speed -= 6.0 * dt
                     if self.roulette_game.wheel_speed <= 0:
                         self.roulette_game.wheel_speed = 0
                         self.roulette_game.stopped = True
@@ -1633,7 +1633,7 @@ class GameUI:
                         else:
                             self.roulette_game.result = "lose"
                             self.screen_shake = 0.2
-                        self.roulette_game.result_timer = 2.0
+                        self.roulette_game.result_timer = 1.2
 
         # Update claw minigame
         if self.claw_game.active:
