@@ -457,9 +457,11 @@ class GameService:
                     self.world.destroy_entity(mid)
                 square.clear_all_monsters()
 
-                # Revert square back to EMPTY (dynamic board)
-                square.square_type = SquareType.EMPTY
-                square.name = "Empty"
+                # Revert square back to EMPTY (only for dynamic squares, not special ones)
+                special_indices = {0, 5, 8, 10, 15, 18, 20, 25, 28, 30, 35, 38}
+                if square.index not in special_indices:
+                    square.square_type = SquareType.EMPTY
+                    square.name = "Empty"
 
                 # Check if boss was defeated
                 if is_boss:
@@ -480,9 +482,11 @@ class GameService:
             result.pending_item_component = self.world.get_component(
                 item_id, ItemComponent
             )
-            # Revert square back to EMPTY after collecting item
-            square.square_type = SquareType.EMPTY
-            square.name = "Empty"
+            # Revert square back to EMPTY after collecting item (only dynamic squares)
+            special_indices = {0, 5, 8, 10, 15, 18, 20, 25, 28, 30, 35, 38}
+            if square.index not in special_indices:
+                square.square_type = SquareType.EMPTY
+                square.name = "Empty"
 
         elif square.square_type == SquareType.BLESSING:
             # Grant blessing
@@ -504,9 +508,11 @@ class GameService:
                 if blessing2.is_permanent:
                     self._apply_permanent_blessing(blessing2, player_stats)
 
-            # Revert square back to EMPTY after collecting blessing
-            square.square_type = SquareType.EMPTY
-            square.name = "Empty"
+            # Revert square back to EMPTY after collecting blessing (only dynamic squares)
+            special_indices = {0, 5, 8, 10, 15, 18, 20, 25, 28, 30, 35, 38}
+            if square.index not in special_indices:
+                square.square_type = SquareType.EMPTY
+                square.name = "Empty"
 
         elif square.square_type == SquareType.CORNER_REST:
             # Heal at inn
