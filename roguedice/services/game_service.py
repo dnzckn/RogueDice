@@ -270,48 +270,49 @@ class GameService:
     def _spawn_monsters_on_pass_start(self, current_round: int) -> List[int]:
         """
         Spawn exactly 4 monsters when passing START.
-        Can either add +1 monster to existing monster squares or convert empty squares to monster squares.
+        Spawns on EMPTY squares (converting them to MONSTER type).
+        Can also stack on existing MONSTER squares if no EMPTY available.
         """
         spawned_squares = []
         player_pos = self.get_player_position()
 
-        # Collect valid squares: monster squares OR empty squares (not corners, not player position)
-        monster_squares = []  # Existing monster squares (can add +1)
-        empty_squares = []    # Empty squares (can convert to monster)
-        corner_indices = {0, 10, 20, 30}
-        arcade_indices = {5, 15, 25, 35}
+        # Special squares that should never have content
+        special_indices = {0, 5, 8, 10, 15, 18, 20, 25, 28, 30, 35, 38}
+
+        empty_squares = []  # EMPTY squares (will convert to MONSTER)
+        monster_squares = []  # Existing MONSTER squares (can stack)
 
         for entity_id, square in self.world.query(BoardSquareComponent):
-            if square.index in corner_indices or square.index in arcade_indices:
+            if square.index in special_indices:
                 continue
             if square.index == player_pos:
                 continue
-            if square.square_type == SquareType.MONSTER:
-                monster_squares.append(square)
-            elif square.square_type == SquareType.EMPTY:
+            if square.square_type == SquareType.EMPTY:
                 empty_squares.append(square)
+            elif square.square_type == SquareType.MONSTER:
+                monster_squares.append(square)
 
         # Spawn 4 monsters
         for _ in range(4):
-            if not monster_squares and not empty_squares:
+            if not empty_squares and not monster_squares:
                 break  # No valid squares left
 
-            # Prefer adding to monster squares (70% chance) if available
-            if monster_squares and (not empty_squares or random.random() < 0.7):
-                square = random.choice(monster_squares)
-                monster_id = self.monster_factory.create_monster(current_round)
-                square.place_monster(monster_id)
-                if square.index not in spawned_squares:
-                    spawned_squares.append(square.index)
-            elif empty_squares:
-                # Convert empty square to monster square
+            # Prefer EMPTY squares (convert to MONSTER)
+            if empty_squares:
                 square = random.choice(empty_squares)
                 empty_squares.remove(square)
                 square.square_type = SquareType.MONSTER
                 monster_id = self.monster_factory.create_monster(current_round)
                 square.place_monster(monster_id)
-                monster_squares.append(square)  # Now it's a monster square
+                monster_squares.append(square)  # Now a monster square
                 spawned_squares.append(square.index)
+            elif monster_squares:
+                # Stack monster on existing monster square
+                square = random.choice(monster_squares)
+                monster_id = self.monster_factory.create_monster(current_round)
+                square.place_monster(monster_id)
+                if square.index not in spawned_squares:
+                    spawned_squares.append(square.index)
 
         return spawned_squares
 
@@ -452,6 +453,10 @@ class GameService:
                     self.world.destroy_entity(mid)
                 square.clear_all_monsters()
 
+                # Revert square back to EMPTY (dynamic board)
+                square.square_type = SquareType.EMPTY
+                square.name = "Empty"
+
                 # Check if boss was defeated
                 if is_boss:
                     player.boss_defeated = True
@@ -471,6 +476,9 @@ class GameService:
             result.pending_item_component = self.world.get_component(
                 item_id, ItemComponent
             )
+            # Revert square back to EMPTY after collecting item
+            square.square_type = SquareType.EMPTY
+            square.name = "Empty"
 
         elif square.square_type == SquareType.BLESSING:
             # Grant blessing
@@ -491,6 +499,10 @@ class GameService:
                 player.add_blessing(blessing2)
                 if blessing2.is_permanent:
                     self._apply_permanent_blessing(blessing2, player_stats)
+
+            # Revert square back to EMPTY after collecting blessing
+            square.square_type = SquareType.EMPTY
+            square.name = "Empty"
 
         elif square.square_type == SquareType.CORNER_REST:
             # Heal at inn
@@ -518,26 +530,34 @@ class GameService:
                 result.trigger_monster_minigame = True
 
     def _trigger_curse(self, current_round: int) -> List[int]:
-        """Trigger curse effect - spawn 2-4 monsters on random empty squares."""
+        """Trigger curse effect - spawn 2-4 monsters on random EMPTY squares."""
         import random
         spawned_squares = []
 
-        # Get all empty monster squares
-        empty_monster_squares = []
-        for entity_id, square in self.world.query(BoardSquareComponent):
-            if (square.square_type == SquareType.MONSTER and
-                not square.has_monster):
-                empty_monster_squares.append((entity_id, square))
+        # Special squares that should never have content
+        special_indices = {0, 5, 8, 10, 15, 18, 20, 25, 28, 30, 35, 38}
+        player_pos = self.get_player_position()
 
-        if not empty_monster_squares:
+        # Get all EMPTY squares (excluding special squares and player position)
+        empty_squares = []
+        for entity_id, square in self.world.query(BoardSquareComponent):
+            if square.index in special_indices:
+                continue
+            if square.index == player_pos:
+                continue
+            if square.square_type == SquareType.EMPTY:
+                empty_squares.append((entity_id, square))
+
+        if not empty_squares:
             return []
 
-        # Spawn 2-4 monsters (more at higher rounds)
-        num_to_spawn = min(len(empty_monster_squares), random.randint(2, 4))
-
-        squares_to_spawn = random.sample(empty_monster_squares, num_to_spawn)
+        # Spawn 2-4 monsters
+        num_to_spawn = min(len(empty_squares), random.randint(2, 4))
+        squares_to_spawn = random.sample(empty_squares, num_to_spawn)
 
         for square_entity_id, square in squares_to_spawn:
+            # Convert EMPTY to MONSTER and spawn
+            square.square_type = SquareType.MONSTER
             monster_id = self.monster_factory.create_monster(current_round)
             square.place_monster(monster_id)
             spawned_squares.append(square.index)

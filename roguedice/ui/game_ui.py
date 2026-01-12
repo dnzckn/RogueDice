@@ -582,6 +582,32 @@ class GameUI:
         game.reward_item_id = game.item_id
         game.result_timer = 2.0
         self._add_particles(self.WINDOW_WIDTH - 245, 200, PALETTE['gold'], 20)
+        # Update the actual item's rarity
+        self._update_blacksmith_item_rarity(game)
+
+    def _update_blacksmith_item_rarity(self, game) -> None:
+        """Update the actual item's rarity based on blacksmith upgrades."""
+        from ..models.enums import Rarity
+        from ..components.item import ItemComponent
+
+        if game.item_id is None:
+            return
+
+        # Map current_rarity index to Rarity enum
+        rarity_map = {
+            0: Rarity.COMMON,
+            1: Rarity.UNCOMMON,
+            2: Rarity.RARE,
+            3: Rarity.EPIC,
+            4: Rarity.LEGENDARY,
+        }
+
+        new_rarity = rarity_map.get(game.current_rarity, Rarity.COMMON)
+
+        # Update the item component
+        item_comp = self.game.world.get_component(game.item_id, ItemComponent)
+        if item_comp:
+            item_comp.rarity = new_rarity
 
     def _archery_shoot(self) -> None:
         """Fire an arrow in the archery minigame."""
@@ -641,9 +667,10 @@ class GameUI:
             minigame.reward_item_id = None
         elif reward_type == "blessing":
             # Blessing - heal player and give small stat buff
-            if player:
-                heal_amount = int(player.max_hp * 0.25)
-                player.hp = min(player.hp + heal_amount, player.max_hp)
+            player_stats = self.game.get_player_stats()
+            if player_stats:
+                heal_amount = int(player_stats.max_hp * 0.25)
+                player_stats.heal(heal_amount)
                 self._add_floating_text(f"+{heal_amount} HP!", self.WINDOW_WIDTH - 200, 200, PALETTE['green'], 1.5)
             minigame.reward_item_id = None
 
@@ -1864,6 +1891,8 @@ class GameUI:
                                     game.result = "win"
                                     game.reward_item_id = game.item_id
                                     game.result_timer = 2.5
+                                    # Update the actual item's rarity
+                                    self._update_blacksmith_item_rarity(game)
                             else:
                                 game.item_broken = True
                                 game.result = "lose"

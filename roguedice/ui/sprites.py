@@ -1565,18 +1565,13 @@ class SpriteGenerator:
         cx, cy = size // 2, size // 2
 
         if square_type == SquareType.MONSTER:
-            # MONSTER squares ALWAYS show a skull - bright when monster present, dimmed when empty
-            if has_monster:
-                # ACTIVE MONSTER: Skull with red glow = DANGER, FIGHT HERE!
-                pygame.draw.circle(surf, (200, 50, 50, 100), (cx, cy), 14)
-                skull_color = (240, 240, 230)
-                eye_color = (30, 30, 30)
-            else:
-                # EMPTY MONSTER SQUARE: Dimmed/ghost skull = monsters can spawn here
-                skull_color = (100, 90, 85)  # Dimmed bone color
-                eye_color = (60, 50, 50)  # Dimmed eye sockets
+            # MONSTER square = has monster = show skull with red glow
+            # (Squares revert to EMPTY when monsters cleared, so MONSTER type always has monsters)
+            pygame.draw.circle(surf, (200, 50, 50, 100), (cx, cy), 14)  # Red glow
+            skull_color = (240, 240, 230)
+            eye_color = (30, 30, 30)
 
-            # Draw skull (always visible, just different brightness)
+            # Draw skull
             pygame.draw.circle(surf, skull_color, (cx, cy - 2), 9)
             pygame.draw.circle(surf, eye_color, (cx - 3, cy - 4), 2)  # Left eye
             pygame.draw.circle(surf, eye_color, (cx + 3, cy - 4), 2)  # Right eye
