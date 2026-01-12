@@ -123,6 +123,112 @@ class MonsterFactory:
 
         return entity_id
 
+    def create_boss(self, current_round: int) -> int:
+        """
+        Create the boss entity with hardcoded fallback.
+
+        Args:
+            current_round: Current game round (affects scaling)
+
+        Returns:
+            Entity ID of created boss
+        """
+        # Try to find boss template
+        template = None
+        for t in self.templates:
+            if t.get("id") == "boss_dragon" or t.get("is_boss", False):
+                template = t
+                break
+
+        # Fallback to hardcoded boss template if not found
+        if template is None:
+            print("WARNING: Boss template not found in JSON, using hardcoded fallback")
+            template = self._boss_template()
+
+        # Create entity
+        entity_id = self.world.create_entity()
+
+        # Scale stats based on round
+        scaling = template.get("scaling", {})
+        rounds_scaling = current_round - 1
+
+        base_hp = template.get("base_hp", 12000)
+        hp_per_round = scaling.get("hp_per_round", 800)
+        final_hp = int(base_hp + hp_per_round * rounds_scaling)
+
+        base_damage = template.get("base_damage", 18)
+        damage_per_round = scaling.get("damage_per_round", 2.0)
+        final_damage = base_damage + damage_per_round * rounds_scaling
+
+        # Boss defense is NOT capped
+        defense = template.get("defense", 20) + current_round
+
+        # Create stats component
+        stats = StatsComponent(
+            max_hp=final_hp,
+            current_hp=final_hp,
+            base_damage=final_damage,
+            attack_speed=template.get("attack_speed", 0.8),
+            defense=defense,
+            crit_chance=template.get("crit_chance", 0.15),
+            crit_multiplier=template.get("crit_multiplier", 2.0),
+            life_steal=template.get("life_steal", 0.05),
+            true_damage=template.get("true_damage", 5),
+        )
+        self.world.add_component(entity_id, stats)
+
+        # Create monster component
+        monster = MonsterComponent(
+            name=template.get("name", "Ancient Dragon"),
+            template_id=template.get("id", "boss_dragon"),
+            tier=template.get("tier", 10),
+            sprite_name=template.get("sprite", "dragon"),
+            drop_chance=template.get("drop_chance", 1.0),
+            gold_reward=int(template.get("gold_reward", 1000) * (1 + current_round * 0.2)),
+            special_moves=template.get("special_moves", [
+                {"name": "Fire Breath", "damage_mult": 1.5, "animation": "fire"},
+                {"name": "Tail Swipe", "damage_mult": 0.8, "animation": "swipe"},
+                {"name": "Dragon Roar", "damage_mult": 0.5, "animation": "roar", "effect": "stun"},
+                {"name": "Wing Gust", "damage_mult": 0.6, "animation": "wind"},
+                {"name": "Claw Slash", "damage_mult": 1.2, "animation": "slash"}
+            ]),
+        )
+        self.world.add_component(entity_id, monster)
+
+        print(f"Boss created: {monster.name} with {final_hp} HP, {final_damage:.0f} damage")
+        return entity_id
+
+    def _boss_template(self) -> Dict:
+        """Return hardcoded boss template as fallback."""
+        return {
+            "id": "boss_dragon",
+            "name": "Ancient Dragon",
+            "tier": 10,
+            "is_boss": True,
+            "base_hp": 12000,
+            "base_damage": 18,
+            "attack_speed": 0.8,
+            "defense": 20,
+            "crit_chance": 0.15,
+            "crit_multiplier": 2.0,
+            "true_damage": 5,
+            "life_steal": 0.05,
+            "sprite": "dragon",
+            "drop_chance": 1.0,
+            "gold_reward": 1000,
+            "special_moves": [
+                {"name": "Fire Breath", "damage_mult": 1.5, "animation": "fire"},
+                {"name": "Tail Swipe", "damage_mult": 0.8, "animation": "swipe"},
+                {"name": "Dragon Roar", "damage_mult": 0.5, "animation": "roar", "effect": "stun"},
+                {"name": "Wing Gust", "damage_mult": 0.6, "animation": "wind"},
+                {"name": "Claw Slash", "damage_mult": 1.2, "animation": "slash"}
+            ],
+            "scaling": {
+                "hp_per_round": 800,
+                "damage_per_round": 2.0
+            }
+        }
+
     def _default_template(self) -> Dict:
         """Return default monster template."""
         return {

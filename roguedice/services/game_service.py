@@ -322,15 +322,15 @@ class GameService:
         boss_square = self.board_factory.get_square_at(30)
         if boss_square and not boss_square.has_monster:
             player = self.world.get_component(self.player_id, PlayerComponent)
-            # Create a powerful boss monster
-            boss_id = self.monster_factory.create_monster(
+            # Create the boss using dedicated method with proper fallbacks
+            boss_id = self.monster_factory.create_boss(
                 current_round=player.current_round + 5,  # Boss is stronger
-                template_id="boss_dragon",
             )
             if boss_id:
                 boss_square.place_monster(boss_id)
                 self.boss_entity_id = boss_id
                 self.boss_active = True
+                print(f"Boss spawned! Entity ID: {boss_id}, Active: {self.boss_active}")
 
     def _spawn_monsters_on_pass_start(self, current_round: int) -> List[int]:
         """
