@@ -23,6 +23,7 @@ class BoardFactory:
         "CORNER_REST": SquareType.CORNER_REST,
         "CORNER_BOSS": SquareType.CORNER_BOSS,
         "SPECIAL": SquareType.SPECIAL,
+        "ARCADE": SquareType.ARCADE,
     }
 
     def __init__(self, world: World, data_path: Optional[Path] = None):
@@ -40,9 +41,23 @@ class BoardFactory:
         return self._default_board()
 
     def _default_board(self) -> Dict:
-        """Generate default board if no file exists."""
+        """Generate default board if no file exists.
+
+        Board layout:
+        - Corners: 0 (Start), 10 (Shop), 20 (Inn), 30 (Boss Arena)
+        - Arcade squares: 5, 15, 25, 35 (center of each side - trigger minigames)
+        - Curse squares: 8, 18, 28, 38 (dangerous squares)
+        - Monster squares: various positions (enemies spawn here)
+        - Empty squares: safe spaces that can dynamically spawn boons/monsters
+
+        Note: ITEM and BLESSING squares are NOT placed on the board initially.
+        They spawn dynamically when player passes START (1 boon per lap).
+        """
         squares = []
-        blessing_indices = {5, 15, 25, 35}  # Blessing shrines
+        arcade_indices = {5, 15, 25, 35}  # Arcade minigame squares (center of each side)
+        curse_indices = {8, 18, 28, 38}   # Curse squares
+        # Monster squares at roughly every other non-special position
+        monster_indices = {1, 3, 7, 9, 11, 13, 17, 19, 21, 23, 27, 29, 31, 33, 37, 39}
 
         for i in range(40):
             if i == 0:
@@ -53,14 +68,14 @@ class BoardFactory:
                 square = {"index": i, "type": "CORNER_REST", "name": "Inn"}
             elif i == 30:
                 square = {"index": i, "type": "CORNER_BOSS", "name": "Boss Arena"}
-            elif i in blessing_indices:
-                square = {"index": i, "type": "BLESSING", "name": "Shrine"}
-            elif i % 3 == 1:
-                square = {"index": i, "type": "MONSTER", "name": f"Danger Zone"}
-            elif i % 3 == 2:
-                square = {"index": i, "type": "ITEM", "name": f"Treasure"}
+            elif i in arcade_indices:
+                square = {"index": i, "type": "ARCADE", "name": "Arcade"}
+            elif i in curse_indices:
+                square = {"index": i, "type": "CURSE", "name": "Cursed Ground"}
+            elif i in monster_indices:
+                square = {"index": i, "type": "MONSTER", "name": "Danger Zone"}
             else:
-                square = {"index": i, "type": "EMPTY", "name": f"Path"}
+                square = {"index": i, "type": "EMPTY", "name": "Path"}
             squares.append(square)
 
         return {"name": "Default Board", "size": 40, "squares": squares}

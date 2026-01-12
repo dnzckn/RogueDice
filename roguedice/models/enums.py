@@ -58,6 +58,7 @@ class SquareType(Enum):
     CORNER_REST = auto()     # Index 20 - Inn/heal
     CORNER_BOSS = auto()     # Index 30 - Boss spawns after round 20
     SPECIAL = auto()         # Random events
+    ARCADE = auto()          # Minigame squares at 5, 15, 25, 35
 
 
 class StatType(Enum):

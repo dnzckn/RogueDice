@@ -1488,13 +1488,14 @@ class SpriteGenerator:
     # ========== BOARD TILES ==========
 
     def create_board_tile(self, size: int, square_type: SquareType,
-                          has_monster: bool = False, has_player: bool = False) -> pygame.Surface:
+                          has_monster: bool = False, has_player: bool = False,
+                          square_index: int = -1) -> pygame.Surface:
         """Create a polished board tile."""
-        key = f"tile_{size}_{square_type.name}_{has_monster}_{has_player}"
-        return self.get_or_create(key, self._create_tile_impl, size, square_type, has_monster, has_player)
+        key = f"tile_{size}_{square_type.name}_{has_monster}_{has_player}_{square_index}"
+        return self.get_or_create(key, self._create_tile_impl, size, square_type, has_monster, has_player, square_index)
 
     def _create_tile_impl(self, size: int, square_type: SquareType,
-                          has_monster: bool, has_player: bool) -> pygame.Surface:
+                          has_monster: bool, has_player: bool, square_index: int) -> pygame.Surface:
         surf = pygame.Surface((size, size), pygame.SRCALPHA)
 
         # Map square types to floor tile types
@@ -1509,6 +1510,7 @@ class SpriteGenerator:
             SquareType.CORNER_REST: 'rest',
             SquareType.CORNER_BOSS: 'boss',
             SquareType.SPECIAL: 'special',
+            SquareType.ARCADE: 'arcade',
         }
 
         # Try to load external floor tile
@@ -1533,6 +1535,7 @@ class SpriteGenerator:
                 SquareType.CORNER_REST: ((40, 70, 90), (25, 50, 70)),     # Blue (healing)
                 SquareType.CORNER_BOSS: ((100, 30, 30), (80, 20, 20)),    # Bright red (boss)
                 SquareType.SPECIAL: ((80, 60, 100), (60, 45, 80)),        # Purple (random)
+                SquareType.ARCADE: ((30, 90, 90), (20, 70, 70)),          # Cyan (arcade minigames)
             }
 
             main_color, dark_color = type_colors.get(square_type, (PALETTE['gray'], PALETTE['gray_dark']))
@@ -1553,6 +1556,7 @@ class SpriteGenerator:
             SquareType.CORNER_SHOP: (200, 170, 80), # Gold
             SquareType.CORNER_REST: (100, 180, 220),# Cyan
             SquareType.CORNER_BOSS: (220, 80, 80),  # Bright red
+            SquareType.ARCADE: (0, 220, 220),       # Bright cyan (arcade)
         }
         border_color = border_colors.get(square_type, PALETTE['black'])
         pygame.draw.rect(surf, border_color, (0, 0, size, size), 2)
@@ -1561,30 +1565,26 @@ class SpriteGenerator:
         cx, cy = size // 2, size // 2
 
         if square_type == SquareType.MONSTER:
+            # MONSTER squares ALWAYS show a skull - bright when monster present, dimmed when empty
             if has_monster:
                 # ACTIVE MONSTER: Skull with red glow = DANGER, FIGHT HERE!
-                # Red warning glow
                 pygame.draw.circle(surf, (200, 50, 50, 100), (cx, cy), 14)
-                # Skull
-                pygame.draw.circle(surf, (240, 240, 230), (cx, cy - 2), 9)
-                pygame.draw.circle(surf, (30, 30, 30), (cx - 3, cy - 4), 2)  # Left eye
-                pygame.draw.circle(surf, (30, 30, 30), (cx + 3, cy - 4), 2)  # Right eye
-                pygame.draw.polygon(surf, (30, 30, 30), [(cx - 1, cy), (cx + 1, cy), (cx, cy + 2)])  # Nose
-                pygame.draw.rect(surf, (240, 240, 230), (cx - 5, cy + 4, 10, 5))  # Jaw
-                # Teeth marks
-                for i in range(-4, 5, 2):
-                    pygame.draw.line(surf, (30, 30, 30), (cx + i, cy + 4), (cx + i, cy + 8), 1)
+                skull_color = (240, 240, 230)
+                eye_color = (30, 30, 30)
             else:
-                # EMPTY DANGER ZONE: Just crossed swords = potential danger, no monster now
-                # Draw crossed swords to show it's a battle zone
-                pygame.draw.line(surf, (120, 100, 90), (cx - 8, cy - 8), (cx + 8, cy + 8), 2)
-                pygame.draw.line(surf, (120, 100, 90), (cx + 8, cy - 8), (cx - 8, cy + 8), 2)
-                # Small "?" to indicate empty
-                font_surf = pygame.Surface((12, 14), pygame.SRCALPHA)
-                pygame.draw.circle(font_surf, (100, 80, 80), (6, 4), 4, 1)
-                pygame.draw.line(font_surf, (100, 80, 80), (6, 8), (6, 10), 1)
-                pygame.draw.circle(font_surf, (100, 80, 80), (6, 12), 1)
-                surf.blit(font_surf, (cx - 6, cy - 5))
+                # EMPTY MONSTER SQUARE: Dimmed/ghost skull = monsters can spawn here
+                skull_color = (100, 90, 85)  # Dimmed bone color
+                eye_color = (60, 50, 50)  # Dimmed eye sockets
+
+            # Draw skull (always visible, just different brightness)
+            pygame.draw.circle(surf, skull_color, (cx, cy - 2), 9)
+            pygame.draw.circle(surf, eye_color, (cx - 3, cy - 4), 2)  # Left eye
+            pygame.draw.circle(surf, eye_color, (cx + 3, cy - 4), 2)  # Right eye
+            pygame.draw.polygon(surf, eye_color, [(cx - 1, cy), (cx + 1, cy), (cx, cy + 2)])  # Nose
+            pygame.draw.rect(surf, skull_color, (cx - 5, cy + 4, 10, 5))  # Jaw
+            # Teeth marks
+            for i in range(-4, 5, 2):
+                pygame.draw.line(surf, eye_color, (cx + i, cy + 4), (cx + i, cy + 8), 1)
 
         elif square_type == SquareType.ITEM:
             # TREASURE CHEST: Blue glow + chest = LOOT!
@@ -1663,6 +1663,36 @@ class SpriteGenerator:
             pygame.draw.circle(surf, (220, 200, 240), (cx, cy - 4), 6, 2)
             pygame.draw.line(surf, (220, 200, 240), (cx + 3, cy - 2), (cx, cy + 3), 2)
             pygame.draw.circle(surf, (220, 200, 240), (cx, cy + 7), 2)
+
+        elif square_type == SquareType.ARCADE:
+            # ARCADE: Game controller/joystick = MINIGAME FUN!
+            pygame.draw.circle(surf, (0, 180, 180, 100), (cx, cy), 14)
+            # Joystick base
+            pygame.draw.ellipse(surf, (60, 60, 70), (cx - 10, cy + 2, 20, 8))
+            pygame.draw.ellipse(surf, (80, 80, 90), (cx - 8, cy + 3, 16, 6))
+            # Joystick stick
+            pygame.draw.line(surf, (100, 100, 110), (cx, cy + 5), (cx, cy - 6), 3)
+            # Joystick ball top
+            pygame.draw.circle(surf, (255, 50, 100), (cx, cy - 8), 5)
+            pygame.draw.circle(surf, (255, 150, 180), (cx - 1, cy - 9), 2)
+            # Sparkle effects
+            pygame.draw.line(surf, (0, 255, 255), (cx - 10, cy - 8), (cx - 7, cy - 8), 1)
+            pygame.draw.line(surf, (255, 0, 255), (cx + 7, cy - 10), (cx + 10, cy - 10), 1)
+            pygame.draw.circle(surf, (255, 255, 0), (cx + 8, cy - 4), 1)
+
+        # Add small arcade/joystick indicator for corner squares 10, 20, 30 (minigame squares)
+        if square_index in (10, 20, 30):
+            # Draw small joystick in top-right corner
+            ax, ay = size - 10, 10  # Top-right corner position
+            # Mini joystick base
+            pygame.draw.ellipse(surf, (60, 60, 70), (ax - 5, ay + 1, 10, 4))
+            # Mini joystick stick
+            pygame.draw.line(surf, (100, 100, 110), (ax, ay + 2), (ax, ay - 3), 2)
+            # Mini joystick ball
+            pygame.draw.circle(surf, (255, 50, 100), (ax, ay - 4), 3)
+            pygame.draw.circle(surf, (255, 150, 180), (ax - 1, ay - 5), 1)
+            # Cyan glow around it
+            pygame.draw.circle(surf, (0, 180, 180), (ax, ay), 8, 1)
 
         # Player token (not used since player is drawn separately now)
         if has_player:

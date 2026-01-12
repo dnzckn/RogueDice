@@ -93,11 +93,20 @@ class ClawMinigame:
     claw_state: str = "moving"  # "moving", "dropping", "grabbing", "rising", "done"
     attempts_left: int = 2
     held_item: Optional[str] = None  # What item claw grabbed
-    items: List = field(default_factory=list)  # (x, y, type, is_rock)
+    held_item_tier: int = 0  # Prize tier: 1=common, 2=rare, 3=epic
+    items: List = field(default_factory=list)  # [x, y, type, is_rock, tier]
     grace_period: float = 1.5  # Time before player can move claw
     result: Optional[str] = None
     result_timer: float = 0.0
     reward_item_id: Optional[int] = None
+    # Conveyor belt - items move sideways
+    conveyor_speed: float = 30.0  # Pixels per second
+    conveyor_direction: int = 1  # 1 = right, -1 = left
+    # Claw sway while dropping
+    claw_sway: float = 0.0  # Current sway offset
+    sway_speed: float = 8.0  # How fast it sways
+    sway_amplitude: float = 25.0  # Max sway distance
+    drop_time: float = 0.0  # Time since drop started
 
 
 @dataclass
@@ -515,13 +524,12 @@ class GameUI:
                             if self.monster_game.player_index >= len(self.monster_game.sequence):
                                 self._monster_round_complete()
                         else:
-                            # Wrong input - FAIL!
+                            # Wrong input - reset progress (timer keeps running)
                             self.monster_game.last_input_correct = False
                             self.monster_game.input_flash_timer = 0.3
-                            self.monster_game.result = "lose"
-                            self.monster_game.result_timer = 2.5
-                            self.screen_shake = 0.4
-                            self._add_particles(self.WINDOW_WIDTH - 245, 200, PALETTE['red'], 30)
+                            self.monster_game.player_index = 0  # Reset to beginning of sequence
+                            self.screen_shake = 0.2
+                            self._add_floating_text("Reset!", self.WINDOW_WIDTH - 200, 180, PALETTE['red'], 0.8)
             elif self.monster_game.result_timer <= 0:
                 self._finish_monster_minigame()
             return
@@ -637,6 +645,33 @@ class GameUI:
                 heal_amount = int(player.max_hp * 0.25)
                 player.hp = min(player.hp + heal_amount, player.max_hp)
                 self._add_floating_text(f"+{heal_amount} HP!", self.WINDOW_WIDTH - 200, 200, PALETTE['green'], 1.5)
+            minigame.reward_item_id = None
+
+    def _generate_claw_reward(self, minigame) -> None:
+        """Generate reward for claw machine based on prize tier."""
+        from ..models.enums import Rarity
+        player = self.game.get_player_data()
+        round_num = player.current_round if player else 1
+
+        tier = minigame.held_item_tier
+        if tier == 3:  # Gold/Epic tier
+            minigame.reward_item_id = self.game.item_factory.create_item(
+                round_num + 5,
+                rarity=Rarity.EPIC
+            )
+            self._add_floating_text("EPIC PRIZE!", self.WINDOW_WIDTH - 200, 180, PALETTE['gold'], 1.5)
+        elif tier == 2:  # Silver/Rare tier
+            minigame.reward_item_id = self.game.item_factory.create_item(
+                round_num + 3,
+                rarity=Rarity.RARE
+            )
+            self._add_floating_text("Rare Prize!", self.WINDOW_WIDTH - 200, 180, (150, 200, 255), 1.5)
+        else:  # Bronze/Common tier
+            # Give gold instead of item for common prizes
+            if player:
+                gold_amount = 25 + round_num * 10
+                player.gold += gold_amount
+                self._add_floating_text(f"+{gold_amount} Gold", self.WINDOW_WIDTH - 200, 180, PALETTE['cream'], 1.5)
             minigame.reward_item_id = None
 
     def _finish_minigame(self, minigame) -> None:
@@ -785,50 +820,65 @@ class GameUI:
         self.state = "minigame"
 
     def start_claw_minigame(self, difficulty: str = "normal") -> None:
-        """Start the claw machine minigame."""
-        # Generate items and rocks
-        # Pit area in draw code is: pygame.Rect(40, 180, panel_w - 80, 140) = x:40-370, y:180-320
-        # Claw drops to y=300, so items should be near bottom of pit
+        """Start the claw machine minigame with moving prizes."""
+        # Pit area: x:60-360, items move on conveyor belt
         items = []
         pit_left, pit_right = 60, 360
-        pit_bottom = 300  # Items sit at bottom of pit
+        pit_bottom = 300
 
-        # Number of good items and rocks based on difficulty
+        # Conveyor speed based on difficulty
         if difficulty == "easy":
-            num_items, num_rocks = 8, 3
-            attempts = 3
+            conveyor_speed = 20.0
+            sway_amp = 15.0
         elif difficulty == "hard":
-            num_items, num_rocks = 4, 8
-            attempts = 2
+            conveyor_speed = 50.0
+            sway_amp = 35.0
         else:
-            num_items, num_rocks = 6, 5
-            attempts = 3
+            conveyor_speed = 35.0
+            sway_amp = 25.0
 
-        # Add treasure items - spread along bottom of pit
-        for _ in range(num_items):
-            x = random.uniform(pit_left + 20, pit_right - 20)
-            y = random.uniform(pit_bottom - 30, pit_bottom + 10)  # Near bottom: y=270-310
-            item_type = random.choice(["gold", "potion", "gem"])
-            items.append([x, y, item_type, False])
+        # Prize tiers: more common items, fewer rare/epic
+        # Tier 1 (common/bronze): gold coins - 5 items
+        for i in range(5):
+            x = pit_left + 30 + i * 60  # Spread evenly
+            y = pit_bottom - 10 + random.uniform(-5, 5)
+            items.append([x, y, "bronze", False, 1])
 
-        # Add rocks (obstacles) - also near bottom
-        for _ in range(num_rocks):
-            x = random.uniform(pit_left + 15, pit_right - 15)
-            y = random.uniform(pit_bottom - 25, pit_bottom + 5)  # y=275-305
-            items.append([x, y, "rock", True])
+        # Tier 2 (rare/silver): potions - 3 items
+        for i in range(3):
+            x = pit_left + 50 + i * 100
+            y = pit_bottom - 15 + random.uniform(-5, 5)
+            items.append([x, y, "silver", False, 2])
+
+        # Tier 3 (epic/gold): gems - 1 item (the prize!)
+        x = random.uniform(pit_left + 80, pit_right - 80)
+        y = pit_bottom - 20
+        items.append([x, y, "gold", False, 3])
+
+        # Shuffle item positions a bit
+        random.shuffle(items)
+        for i, item in enumerate(items):
+            item[0] = pit_left + 30 + (i * 35) % (pit_right - pit_left - 60)
 
         self.claw_game = ClawMinigame(
             active=True,
             claw_x=225.0,
             claw_y=60.0,
             claw_state="moving",
-            attempts_left=attempts,
+            attempts_left=2,  # Always 2 attempts
             held_item=None,
+            held_item_tier=0,
             items=items,
             grace_period=1.5,
             result=None,
             result_timer=0.0,
-            reward_item_id=None
+            reward_item_id=None,
+            conveyor_speed=conveyor_speed,
+            conveyor_direction=1,
+            claw_sway=0.0,
+            sway_speed=8.0,
+            sway_amplitude=sway_amp,
+            drop_time=0.0,
         )
         self.state = "minigame"
 
@@ -1560,60 +1610,85 @@ class GameUI:
 
         # Update claw minigame
         if self.claw_game.active:
-            if self.claw_game.result:
-                self.claw_game.result_timer -= dt
-                if self.claw_game.result_timer <= 0:
-                    self._finish_minigame(self.claw_game)
+            game = self.claw_game
+            pit_left, pit_right = 60, 360
+
+            # Always move conveyor belt (items slide left/right)
+            if not game.result:
+                for item in game.items:
+                    item[0] += game.conveyor_speed * game.conveyor_direction * dt
+                    # Bounce off walls
+                    if item[0] <= pit_left + 15:
+                        item[0] = pit_left + 15
+                        game.conveyor_direction = 1
+                    elif item[0] >= pit_right - 15:
+                        item[0] = pit_right - 15
+                        game.conveyor_direction = -1
+
+            if game.result:
+                game.result_timer -= dt
+                if game.result_timer <= 0:
+                    self._finish_minigame(game)
             else:
-                if self.claw_game.grace_period > 0:
-                    self.claw_game.grace_period -= dt
-                elif self.claw_game.claw_state == "dropping":
-                    self.claw_game.claw_y += 200 * dt
-                    if self.claw_game.claw_y >= 300:  # Drop to bottom of pit
-                        self.claw_game.claw_y = 300
-                        self.claw_game.claw_state = "grabbing"
+                if game.grace_period > 0:
+                    game.grace_period -= dt
+                elif game.claw_state == "dropping":
+                    # Track drop time for sway calculation
+                    game.drop_time += dt
+                    # Claw sways while dropping (sine wave)
+                    game.claw_sway = math.sin(game.drop_time * game.sway_speed) * game.sway_amplitude
+
+                    game.claw_y += 200 * dt
+                    if game.claw_y >= 300:
+                        game.claw_y = 300
+                        game.claw_state = "grabbing"
+                        # Actual grab position includes sway
+                        grab_x = game.claw_x + game.claw_sway
                         # Find closest item within grab range
                         grabbed = None
-                        best_dist = 50  # Grab radius
-                        for item in self.claw_game.items:
-                            x, y, item_type, is_rock = item
-                            # Use actual distance, not Manhattan
-                            dx = x - self.claw_game.claw_x
-                            dy = y - self.claw_game.claw_y
+                        best_dist = 40  # Grab radius
+                        for item in game.items:
+                            x, y, item_type, is_rock, tier = item
+                            dx = x - grab_x
+                            dy = y - game.claw_y
                             dist = (dx * dx + dy * dy) ** 0.5
                             if dist < best_dist:
                                 best_dist = dist
                                 grabbed = item
                         if grabbed:
-                            self.claw_game.held_item = grabbed[2]
-                            self.claw_game.items.remove(grabbed)
-                        self.claw_game.claw_state = "rising"
-                elif self.claw_game.claw_state == "rising":
-                    self.claw_game.claw_y -= 150 * dt
-                    if self.claw_game.held_item and random.random() < 0.01:
-                        self.claw_game.held_item = None
-                    if self.claw_game.claw_y <= 60:
-                        self.claw_game.claw_y = 60
-                        self.claw_game.attempts_left -= 1
-                        if self.claw_game.held_item and self.claw_game.held_item != "rock":
-                            self.claw_game.result = "win"
-                            self._add_particles(self.WINDOW_WIDTH - 245, 150, PALETTE['gold'], 30)
-                            self._generate_minigame_reward(self.claw_game)
-                            self.claw_game.result_timer = 2.0
-                        elif self.claw_game.held_item == "rock":
-                            self.claw_game.held_item = None
-                            self.screen_shake = 0.2
-                            if self.claw_game.attempts_left <= 0:
-                                self.claw_game.result = "lose"
-                                self.claw_game.result_timer = 2.0
-                            else:
-                                self.claw_game.claw_state = "moving"
-                        elif self.claw_game.attempts_left <= 0:
-                            self.claw_game.result = "lose"
-                            self.claw_game.result_timer = 2.0
+                            game.held_item = grabbed[2]
+                            game.held_item_tier = grabbed[4]
+                            game.items.remove(grabbed)
+                            # Visual feedback based on tier
+                            tier_colors = {1: PALETTE['gray_light'], 2: (150, 200, 255), 3: PALETTE['gold']}
+                            tier_names = {1: "Bronze!", 2: "Silver!", 3: "GOLD!"}
+                            color = tier_colors.get(grabbed[4], PALETTE['green'])
+                            text = tier_names.get(grabbed[4], "Got it!")
+                            self._add_floating_text(text, self.WINDOW_WIDTH - 200, 280, color, 0.8)
                         else:
-                            self.claw_game.claw_state = "moving"
-                            self.claw_game.held_item = None
+                            self._add_floating_text("Miss!", self.WINDOW_WIDTH - 200, 280, PALETTE['red'], 0.8)
+                        game.claw_state = "rising"
+                        game.claw_sway = 0  # Reset sway for rising
+                elif game.claw_state == "rising":
+                    game.claw_y -= 150 * dt
+                    # No dropping! Claw always keeps the item
+                    if game.claw_y <= 60:
+                        game.claw_y = 60
+                        game.attempts_left -= 1
+                        if game.held_item:
+                            game.result = "win"
+                            # Particles based on tier
+                            tier_colors = {1: PALETTE['gray_light'], 2: (150, 200, 255), 3: PALETTE['gold']}
+                            self._add_particles(self.WINDOW_WIDTH - 245, 150, tier_colors.get(game.held_item_tier, PALETTE['gold']), 30)
+                            self._generate_claw_reward(game)
+                            game.result_timer = 2.0
+                        elif game.attempts_left <= 0:
+                            game.result = "lose"
+                            game.result_timer = 2.0
+                        else:
+                            game.claw_state = "moving"
+                            game.held_item = None
+                            game.drop_time = 0
 
         # Update flappy minigame
         if self.flappy_game.active:
@@ -2174,7 +2249,8 @@ class GameUI:
                 self.SQUARE_SIZE - 2,
                 square.square_type,
                 square.has_monster,
-                False  # Never draw player on tile
+                False,  # Never draw player on tile
+                square.index  # Pass square index for arcade indicator on corners
             )
             surface.blit(tile, (x, y))
 
@@ -3053,66 +3129,110 @@ class GameUI:
         self.screen.blit(panel, (panel_x, panel_y))
 
     def _draw_claw_minigame(self) -> None:
-        """Draw the claw machine minigame."""
+        """Draw the claw machine minigame with conveyor belt and tiered prizes."""
         panel_w, panel_h = 450, 350
         panel_x = self.WINDOW_WIDTH - panel_w - 20
         panel_y = 170
+        game = self.claw_game
 
         panel = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
         pygame.draw.rect(panel, (25, 35, 45, 240), (0, 0, panel_w, panel_h), border_radius=8)
         pygame.draw.rect(panel, (100, 200, 255), (0, 0, panel_w, panel_h), 3, border_radius=8)
 
         # Title
-        title = self.font_large.render("CLAW MACHINE", True, (100, 200, 255))
+        title = self.font_large.render("PRIZE CATCHER", True, (100, 200, 255))
         panel.blit(title, title.get_rect(centerx=panel_w // 2, y=10))
 
-        # Attempts
-        attempts_text = f"Attempts: {self.claw_game.attempts_left}"
-        panel.blit(self.font_medium.render(attempts_text, True, PALETTE['gold']), (20, 40))
+        # Attempts with visual indicators
+        for i in range(2):
+            color = PALETTE['gold'] if i < game.attempts_left else (60, 60, 70)
+            pygame.draw.circle(panel, color, (30 + i * 25, 50), 8)
+        attempts_text = self.font_small.render("Tries", True, PALETTE['cream'])
+        panel.blit(attempts_text, (70, 43))
 
-        # Pit area
+        # Prize legend
+        legend_y = 70
+        pygame.draw.circle(panel, (205, 127, 50), (panel_w - 100, legend_y), 6)  # Bronze
+        panel.blit(self.font_small.render("= Gold", True, PALETTE['cream']), (panel_w - 88, legend_y - 8))
+        pygame.draw.circle(panel, (192, 192, 220), (panel_w - 100, legend_y + 18), 6)  # Silver
+        panel.blit(self.font_small.render("= Rare", True, (150, 200, 255)), (panel_w - 88, legend_y + 10))
+        pygame.draw.circle(panel, PALETTE['gold'], (panel_w - 100, legend_y + 36), 6)  # Gold
+        panel.blit(self.font_small.render("= Epic!", True, PALETTE['gold']), (panel_w - 88, legend_y + 28))
+
+        # Pit area with conveyor belt visual
         pit_rect = pygame.Rect(40, 180, panel_w - 80, 140)
-        pygame.draw.rect(panel, (40, 45, 55), pit_rect, border_radius=4)
+        pygame.draw.rect(panel, (35, 40, 50), pit_rect, border_radius=4)
+
+        # Conveyor belt lines (animated)
+        belt_offset = int((pygame.time.get_ticks() / 50) * game.conveyor_direction) % 20
+        for i in range(-1, 20):
+            lx = pit_rect.left + (i * 20 + belt_offset) % (pit_rect.width + 20)
+            if pit_rect.left <= lx <= pit_rect.right - 5:
+                pygame.draw.line(panel, (50, 55, 65), (lx, pit_rect.bottom - 10), (lx + 10, pit_rect.bottom - 10), 2)
+
+        # Conveyor direction arrows
+        arrow_color = (80, 90, 100)
+        arrow_x = pit_rect.centerx
+        if game.conveyor_direction > 0:
+            pygame.draw.polygon(panel, arrow_color, [(arrow_x + 30, pit_rect.bottom - 5), (arrow_x + 45, pit_rect.bottom - 12), (arrow_x + 30, pit_rect.bottom - 19)])
+        else:
+            pygame.draw.polygon(panel, arrow_color, [(arrow_x - 30, pit_rect.bottom - 5), (arrow_x - 45, pit_rect.bottom - 12), (arrow_x - 30, pit_rect.bottom - 19)])
+
         pygame.draw.rect(panel, (100, 200, 255), pit_rect, 2, border_radius=4)
 
-        # Items
-        for item in self.claw_game.items:
-            x, y, item_type, is_rock = item
-            if is_rock:
-                pygame.draw.circle(panel, (90, 85, 80), (int(x), int(y)), 14)
-                pygame.draw.circle(panel, (70, 65, 60), (int(x), int(y)), 14, 2)
-            else:
-                color = PALETTE['gold'] if item_type == "gold" else PALETTE['green'] if item_type == "potion" else (150, 100, 200)
-                pygame.draw.circle(panel, color, (int(x), int(y)), 12)
-                pygame.draw.circle(panel, (255, 255, 255, 150), (int(x) - 3, int(y) - 3), 4)
+        # Items with tier-based colors
+        tier_colors = {
+            1: (205, 127, 50),    # Bronze
+            2: (192, 192, 220),   # Silver
+            3: PALETTE['gold'],   # Gold
+        }
+        for item in game.items:
+            x, y, item_type, is_rock, tier = item
+            color = tier_colors.get(tier, PALETTE['cream'])
+            size = 10 + tier * 2  # Bigger for better prizes
+            pygame.draw.circle(panel, color, (int(x), int(y)), size)
+            # Shine effect
+            pygame.draw.circle(panel, (255, 255, 255, 180), (int(x) - size//3, int(y) - size//3), size//3)
+            # Star for gold tier
+            if tier == 3:
+                pygame.draw.polygon(panel, (255, 255, 200), [
+                    (int(x), int(y) - size - 5),
+                    (int(x) + 3, int(y) - size + 2),
+                    (int(x) - 3, int(y) - size + 2),
+                ])
 
-        # Claw
-        cx, cy = int(self.claw_game.claw_x), int(self.claw_game.claw_y)
-        pygame.draw.line(panel, (180, 180, 190), (cx, 50), (cx, cy), 3)
-        pygame.draw.line(panel, (180, 180, 190), (cx, cy), (cx - 18, cy + 25), 4)
-        pygame.draw.line(panel, (180, 180, 190), (cx, cy), (cx + 18, cy + 25), 4)
+        # Claw - with sway offset when dropping
+        cx = int(game.claw_x + game.claw_sway)
+        cy = int(game.claw_y)
+        # Cable
+        pygame.draw.line(panel, (150, 150, 160), (int(game.claw_x), 50), (cx, cy), 2)
+        # Claw arms (open wider when dropping, closed when holding)
+        arm_spread = 22 if game.claw_state == "dropping" else 15 if game.held_item else 18
+        pygame.draw.line(panel, (180, 180, 190), (cx, cy), (cx - arm_spread, cy + 25), 4)
+        pygame.draw.line(panel, (180, 180, 190), (cx, cy), (cx + arm_spread, cy + 25), 4)
+        # Claw tips
+        pygame.draw.circle(panel, (200, 200, 210), (cx - arm_spread, cy + 25), 5)
+        pygame.draw.circle(panel, (200, 200, 210), (cx + arm_spread, cy + 25), 5)
         pygame.draw.circle(panel, (200, 200, 210), (cx, cy), 8)
 
         # Held item
-        if self.claw_game.held_item:
-            color = PALETTE['gold'] if self.claw_game.held_item == "gold" else PALETTE['green'] if self.claw_game.held_item == "potion" else (150, 100, 200)
-            if self.claw_game.held_item == "rock":
-                color = (90, 85, 80)
-            pygame.draw.circle(panel, color, (cx, cy + 30), 10)
+        if game.held_item:
+            color = tier_colors.get(game.held_item_tier, PALETTE['cream'])
+            pygame.draw.circle(panel, color, (cx, cy + 30), 10 + game.held_item_tier)
 
         # Grace period overlay
-        if self.claw_game.grace_period > 0 and not self.claw_game.result:
+        if game.grace_period > 0 and not game.result:
             overlay = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
             overlay.fill((0, 0, 0, 120))
             panel.blit(overlay, (0, 0))
             ready_text = self.font_large.render("GET READY!", True, (100, 200, 255))
             panel.blit(ready_text, ready_text.get_rect(center=(panel_w // 2, panel_h // 2 - 20)))
-            hint_text = self.font_small.render("Arrow keys to move, SPACE to drop!", True, (255, 255, 255))
+            hint_text = self.font_small.render("Prizes move! Time your drop!", True, (255, 255, 255))
             panel.blit(hint_text, hint_text.get_rect(center=(panel_w // 2, panel_h // 2 + 20)))
 
         # Instructions
-        elif not self.claw_game.result:
-            instr = self.font_small.render("Arrow keys to move, SPACE to drop", True, PALETTE['cream'])
+        elif not game.result:
+            instr = self.font_small.render("< > Move   SPACE Drop   Claw sways!", True, PALETTE['cream'])
             panel.blit(instr, instr.get_rect(centerx=panel_w // 2, y=330))
         else:
             # Dark overlay for result
@@ -3120,24 +3240,26 @@ class GameUI:
             overlay.fill((0, 0, 0, 180))
             panel.blit(overlay, (0, 0))
 
-            if self.claw_game.result == "win":
-                result_text = "SUCCESS!"
-                result_color = PALETTE['gold']
+            if game.result == "win":
+                tier_names = {1: "BRONZE!", 2: "SILVER!", 3: "GOLD!!!"}
+                tier_msgs = {1: "You got some gold coins!", 2: "You won a rare item!", 3: "EPIC PRIZE!!!"}
+                result_text = tier_names.get(game.held_item_tier, "SUCCESS!")
+                result_color = tier_colors.get(game.held_item_tier, PALETTE['gold'])
                 result_surf = self.font_large.render(result_text, True, result_color)
                 panel.blit(result_surf, result_surf.get_rect(center=(panel_w // 2, panel_h // 2 - 40)))
 
-                reward_text = self.font_medium.render("You grabbed a prize!", True, (255, 255, 255))
+                reward_text = self.font_medium.render(tier_msgs.get(game.held_item_tier, "You grabbed a prize!"), True, (255, 255, 255))
                 panel.blit(reward_text, reward_text.get_rect(center=(panel_w // 2, panel_h // 2)))
 
-                hint_text = self.font_small.render("Nice grab!", True, PALETTE['gold'])
+                hint_text = self.font_small.render("Nice grab!", True, result_color)
                 panel.blit(hint_text, hint_text.get_rect(center=(panel_w // 2, panel_h // 2 + 30)))
             else:
-                result_text = "MISSED!"
+                result_text = "NO PRIZE"
                 result_color = PALETTE['red']
                 result_surf = self.font_large.render(result_text, True, result_color)
                 panel.blit(result_surf, result_surf.get_rect(center=(panel_w // 2, panel_h // 2 - 40)))
 
-                fail_text = self.font_medium.render("The prize slipped away...", True, PALETTE['gray_light'])
+                fail_text = self.font_medium.render("Couldn't grab anything...", True, PALETTE['gray_light'])
                 panel.blit(fail_text, fail_text.get_rect(center=(panel_w // 2, panel_h // 2)))
 
                 hint_text = self.font_small.render("Better luck next time!", True, PALETTE['gray_light'])

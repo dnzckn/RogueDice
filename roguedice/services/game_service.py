@@ -51,6 +51,7 @@ class TurnResult:
     healed: bool = False
     heal_amount: int = 0  # Amount healed (for animations)
     monsters_spawned: List[int] = field(default_factory=list)
+    boon_spawned: Optional[int] = None  # Square index where boon (chest/blessing) spawned
     opened_merchant: bool = False
     game_over: bool = False
     victory: bool = False  # Boss defeated
@@ -214,10 +215,11 @@ class GameService:
                 result.healed = True
                 result.heal_amount = actual_heal
 
-            # Spawn monsters (every 4 rounds)
-            result.monsters_spawned = self.spawn_system.check_and_spawn(
-                player.current_round
-            )
+            # Spawn 4 monsters on passing START
+            result.monsters_spawned = self._spawn_monsters_on_pass_start(player.current_round)
+
+            # Spawn 1 boon (chest or blessing) on an empty space
+            result.boon_spawned = self._spawn_boon_on_pass_start()
 
             # Check for boss spawn
             if player.current_round >= self.BOSS_SPAWN_ROUND and not player.boss_defeated:
@@ -264,6 +266,89 @@ class GameService:
                 boss_square.place_monster(boss_id)
                 self.boss_entity_id = boss_id
                 self.boss_active = True
+
+    def _spawn_monsters_on_pass_start(self, current_round: int) -> List[int]:
+        """
+        Spawn exactly 4 monsters when passing START.
+        Can either add +1 monster to existing monster squares or convert empty squares to monster squares.
+        """
+        spawned_squares = []
+        player_pos = self.get_player_position()
+
+        # Collect valid squares: monster squares OR empty squares (not corners, not player position)
+        monster_squares = []  # Existing monster squares (can add +1)
+        empty_squares = []    # Empty squares (can convert to monster)
+        corner_indices = {0, 10, 20, 30}
+        arcade_indices = {5, 15, 25, 35}
+
+        for entity_id, square in self.world.query(BoardSquareComponent):
+            if square.index in corner_indices or square.index in arcade_indices:
+                continue
+            if square.index == player_pos:
+                continue
+            if square.square_type == SquareType.MONSTER:
+                monster_squares.append(square)
+            elif square.square_type == SquareType.EMPTY:
+                empty_squares.append(square)
+
+        # Spawn 4 monsters
+        for _ in range(4):
+            if not monster_squares and not empty_squares:
+                break  # No valid squares left
+
+            # Prefer adding to monster squares (70% chance) if available
+            if monster_squares and (not empty_squares or random.random() < 0.7):
+                square = random.choice(monster_squares)
+                monster_id = self.monster_factory.create_monster(current_round)
+                square.place_monster(monster_id)
+                if square.index not in spawned_squares:
+                    spawned_squares.append(square.index)
+            elif empty_squares:
+                # Convert empty square to monster square
+                square = random.choice(empty_squares)
+                empty_squares.remove(square)
+                square.square_type = SquareType.MONSTER
+                monster_id = self.monster_factory.create_monster(current_round)
+                square.place_monster(monster_id)
+                monster_squares.append(square)  # Now it's a monster square
+                spawned_squares.append(square.index)
+
+        return spawned_squares
+
+    def _spawn_boon_on_pass_start(self) -> Optional[int]:
+        """
+        Spawn one boon (chest/item or blessing) on an empty square when passing START.
+        Returns the square index where boon spawned, or None if no space available.
+        """
+        player_pos = self.get_player_position()
+        corner_indices = {0, 10, 20, 30}
+        arcade_indices = {5, 15, 25, 35}
+
+        # Find empty squares
+        empty_squares = []
+        for entity_id, square in self.world.query(BoardSquareComponent):
+            if square.index in corner_indices or square.index in arcade_indices:
+                continue
+            if square.index == player_pos:
+                continue
+            if square.square_type == SquareType.EMPTY:
+                empty_squares.append(square)
+
+        if not empty_squares:
+            return None
+
+        # Pick a random empty square
+        square = random.choice(empty_squares)
+
+        # 50% chance chest, 50% chance blessing
+        if random.random() < 0.5:
+            square.square_type = SquareType.ITEM
+            square.name = "Treasure"
+        else:
+            square.square_type = SquareType.BLESSING
+            square.name = "Shrine"
+
+        return square.index
 
     def _force_boss_fight(
         self,
@@ -312,13 +397,15 @@ class GameService:
         """Process landing on a square."""
         import random
 
-        # Corner squares (10, 20, 30) trigger random minigames FIRST
-        # After minigame completes, UI will call process_corner_function()
-        if square.index in [10, 20, 30]:
+        # Corner squares (10, 20, 30) and Arcade squares (5, 15, 25, 35) trigger random minigames
+        # After minigame completes, UI will call process_corner_function() for corners only
+        corner_indices = [10, 20, 30]
+        arcade_indices = [5, 15, 25, 35]
+        if square.index in corner_indices or square.index in arcade_indices:
             minigames = ["timing", "roulette", "claw", "flappy", "archery", "blacksmith"]
             result.trigger_minigame = random.choice(minigames)
-            result.minigame_corner = square.index
-            return  # Don't process corner function yet - UI handles it after minigame
+            result.minigame_corner = square.index if square.index in corner_indices else 0
+            return  # Don't process further - UI handles it after minigame
 
         if square.triggers_combat and square.monster_entity_ids:
             # Check if this is the boss fight
