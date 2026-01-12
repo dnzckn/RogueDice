@@ -200,13 +200,13 @@ class MonsterMinigame:
     """Monster attack minigame - press arrow sequences to survive!
 
     Spawns after curse squares. Fail = 30% HP damage, Pass = 10% heal + item chance.
-    5 rounds, 10 seconds each. Arrow counts: R1=4, R2=8, R3=16, R4=20, R5=25
+    4 rounds, 10 seconds each. Arrow counts: R1=4, R2=8, R3=16, R4=20
     """
     active: bool = False
     # Round progression
-    current_round: int = 1  # 1-5
-    max_rounds: int = 5
-    arrows_per_round: List[int] = field(default_factory=lambda: [4, 8, 16, 20, 25])
+    current_round: int = 1  # 1-4
+    max_rounds: int = 4
+    arrows_per_round: List[int] = field(default_factory=lambda: [4, 8, 16, 20])
     # Current sequence
     sequence: List[str] = field(default_factory=list)  # ["up", "down", "left", "right"]
     player_index: int = 0  # Current position in sequence player needs to hit
@@ -316,28 +316,54 @@ class GameUI:
         self.dragon_last_chains = 8
         self.dragon_speech: Optional[str] = None
         self.dragon_speech_timer: float = 0.0
+        self.dragon_taunt_cooldown: float = 0.0  # Cooldown between idle taunts
         self.DRAGON_QUOTES = [
-            "Grr... that tickles!",
-            "You'll regret this, mortal!",
-            "My power grows stronger!",
-            "Soon I shall be FREE!",
-            "Your doom approaches!",
-            "The chains weaken...",
-            "Foolish adventurer!",
-            "I will burn everything!",
+            "You're... rolling dice? In MY lair?",
+            "Round and round you go... this is humiliating.",
+            "Is this a board game to you?! ...Wait, is it?",
+            "I've been here 1000 years watching you walk in CIRCLES.",
+            "Ooh, landed on a treasure chest. How exciting. *yawn*",
+            "You know I can see you looting my stuff, right?",
+            "Every turn you take, a chain breaks. Keep pushing your luck.",
+            "Three more squares and you pass GO. Oh wait, wrong game.",
+        ]
+        # Random idle taunts while player explores
+        self.DRAGON_IDLE_TAUNTS = [
+            "Are you STILL playing? I could've burned a village by now.",
+            "That's your strategy? Bold. Stupid, but bold.",
+            "I'm literally RIGHT HERE. Stop ignoring me.",
+            "Oh no, a goblin! Whatever will you do. *slow clap*",
+            "Click faster, I'm getting old. Well, older.",
+            "You missed a chest three turns ago. Just saying.",
+            "The suspense is killing me. Not really, I'm immortal.",
+            "Is this your first roguelike? It shows.",
+            "I've seen scarier things in a kobold's lunchbox.",
+            "Pro tip: maybe don't fight everything? Just a thought.",
+            "That item you just got? Trash. I've seen better in sewers.",
+            "You're getting stronger... still not worried though.",
+            "Remember, I'm watching. Always watching. It's all I CAN do.",
+            "Ooh, you passed START! Want a participation trophy?",
+            "Another lap around MY board. Make yourself at home.",
+            "Your dice hate you. I can tell.",
+            "Keep collecting gold. I'll just... take it later.",
+            "Fun fact: this used to be a peaceful lair. USED TO BE.",
         ]
 
         # Boss cinematic for epic final battle intro
         self.boss_cinematic = BossCinematic()
         self.BOSS_ENTRANCE_QUOTES = [
-            "Finally FREE! Time to stretch these wings...",
-            "Did you really think those chains could hold ME?",
-            "Oh, you're still here? How... unfortunate.",
-            "I've been doing pilates for 1000 years. Prepare yourself!",
-            "*cracks neck* Ahh, that's better. Now, where were we?",
-            "You know what's worse than being chained? YOUR FACE!",
-            "I hope you brought marshmallows... for YOUR FUNERAL!",
-            "Plot twist: I was the final boss the WHOLE time!",
+            "Finally! Do you know how BORING it is watching you roll dice?!",
+            "21 rounds of you walking in circles. MY TURN NOW.",
+            "Oh, you thought this was YOUR game? Cute.",
+            "I've memorized every square. I know you skip the curses.",
+            "*cracks neck* I've been doing isometrics. In CHAINS. For CENTURIES.",
+            "Did you really think looting my lair had no consequences?",
+            "Plot twist: the board was inside ME the whole time! Wait, no...",
+            "GG. Just kidding. GET OVER HERE!",
+            "Speed run's over, kid. This is the REAL final boss.",
+            "I watched you lose to a goblin once. A GOBLIN.",
+            "You've passed START 21 times. Each time I died a little inside.",
+            "Hope you saved your game! Oh wait, roguelike. HAHAHAHA!",
         ]
 
         # Battle scene
@@ -785,21 +811,25 @@ class GameUI:
                 player = self.game.get_player_data()
                 round_num = player.current_round if player else 1
 
-                # Roll for rarity - 50% Uncommon, 35% Rare, 12% Epic, 3% Legendary
+                # Roll for rarity - 10% Mythical, 3% Legendary, 12% Epic, 30% Rare, 45% Uncommon
                 rarity_roll = random.random()
-                if rarity_roll < 0.03:  # 3% Legendary
+                if rarity_roll < 0.10:  # 10% Mythical
+                    rarity = Rarity.MYTHICAL
+                    tier_bonus = 12
+                    self._add_floating_text("MYTHICAL DROP!!!", self.WINDOW_WIDTH - 200, 240, (255, 0, 128), 2.5)
+                elif rarity_roll < 0.13:  # 3% Legendary
                     rarity = Rarity.LEGENDARY
                     tier_bonus = 8
                     self._add_floating_text("LEGENDARY DROP!", self.WINDOW_WIDTH - 200, 240, (255, 215, 0), 2.0)
-                elif rarity_roll < 0.15:  # 12% Epic
+                elif rarity_roll < 0.25:  # 12% Epic
                     rarity = Rarity.EPIC
                     tier_bonus = 5
                     self._add_floating_text("Epic Drop!", self.WINDOW_WIDTH - 200, 240, (200, 100, 255), 1.5)
-                elif rarity_roll < 0.50:  # 35% Rare
+                elif rarity_roll < 0.55:  # 30% Rare
                     rarity = Rarity.RARE
                     tier_bonus = 3
                     self._add_floating_text("Rare Drop!", self.WINDOW_WIDTH - 200, 240, (100, 150, 255), 1.2)
-                else:  # 50% Uncommon
+                else:  # 45% Uncommon
                     rarity = Rarity.UNCOMMON
                     tier_bonus = 1
 
@@ -1048,21 +1078,25 @@ class GameUI:
 
     def start_blacksmith_minigame(self, difficulty: str = "normal") -> None:
         """Start the blacksmith gamble minigame."""
+        import random
         from ..models.enums import Rarity
-        # Generate an item to upgrade (starts at Common or Uncommon)
         player = self.game.get_player_data()
         round_num = player.current_round if player else 1
 
-        # Create a common item for the gamble
-        item_id = self.game.item_factory.create_item(round_num, rarity=Rarity.COMMON)
-
-        # Difficulty affects starting rarity
-        if difficulty == "easy":
-            start_rarity = 1  # Start with Uncommon
-        elif difficulty == "hard":
-            start_rarity = 0  # Start with Common, harder success rates
-        else:
+        # Roll for starting rarity: 47.5% Common, 47.5% Uncommon, 5% Rare
+        roll = random.random()
+        if roll < 0.475:
             start_rarity = 0  # Common
+            item_rarity = Rarity.COMMON
+        elif roll < 0.95:
+            start_rarity = 1  # Uncommon
+            item_rarity = Rarity.UNCOMMON
+        else:
+            start_rarity = 2  # Rare
+            item_rarity = Rarity.RARE
+
+        # Create item with the rolled rarity
+        item_id = self.game.item_factory.create_item(round_num, rarity=item_rarity)
 
         self.blacksmith_game = BlacksmithMinigame(
             active=True,
@@ -1106,8 +1140,8 @@ class GameUI:
         self.monster_game = MonsterMinigame(
             active=True,
             current_round=1,
-            max_rounds=5,
-            arrows_per_round=[4, 8, 16, 20, 25],
+            max_rounds=4,
+            arrows_per_round=[4, 8, 16, 20],
             sequence=first_sequence,
             player_index=0,
             round_timer=10.0,
@@ -1514,6 +1548,9 @@ class GameUI:
                     if result.is_boss_fight:
                         msg = "BOSS DEFEATED! " + msg
                         self._add_particles(300, 300, PALETTE['gold'], 30)
+                    else:
+                        # Dragon might comment on the battle
+                        self._maybe_dragon_taunt()
                     self.message_log.append(msg)
                 else:
                     self.message_log.append("Defeated!")
@@ -1595,6 +1632,11 @@ class GameUI:
             self._add_particles(self.WINDOW_WIDTH // 2, 200, PALETTE['gold'], 50)
         if result.game_over:
             self.state = "game_over"
+
+        # Maybe trigger a dragon taunt after player action
+        if self.state == "playing":
+            self._maybe_dragon_taunt()
+
         self.message_log = self.message_log[-8:]
 
     def _add_particles(self, x: int, y: int, color: Tuple, count: int):
@@ -2152,11 +2194,13 @@ class GameUI:
         if movement_done and self.pending_turn_result and not self.battle_scene.is_active():
             # First, process the landing square now that player has arrived
             if getattr(self, 'square_processing_pending', False):
-                # This processes combat, items, blessings, etc.
+                # This processes combat, items, blessings, etc. AND lap completion (board refill)
                 updated_result = self.game.process_landing_square()
                 # Merge the updated result (combat, items, etc.) with our pending result
                 self.pending_turn_result = updated_result
                 self.square_processing_pending = False
+                # Invalidate board cache so new spawns are visible
+                self._board_surface = None
 
                 # Check if combat was triggered - start battle scene!
                 if updated_result.combat_result:
@@ -2172,6 +2216,10 @@ class GameUI:
             self.dragon_speech_timer -= dt
             if self.dragon_speech_timer <= 0:
                 self.dragon_speech = None
+
+        # Update dragon taunt cooldown
+        if self.dragon_taunt_cooldown > 0:
+            self.dragon_taunt_cooldown -= dt
 
         # Update particles
         for p in self.particle_effects[:]:
@@ -2463,6 +2511,28 @@ class GameUI:
         # Draw dragon speech bubble if active
         if self.dragon_speech and self.dragon_speech_timer > 0:
             self._draw_dragon_speech_bubble(surface, center_x, dragon_y - 20)
+
+    def _maybe_dragon_taunt(self, force: bool = False) -> None:
+        """Maybe trigger a random dragon idle taunt."""
+        import random
+        # Don't taunt if already speaking or on cooldown
+        if self.dragon_speech_timer > 0:
+            return
+        if not force and self.dragon_taunt_cooldown > 0:
+            return
+
+        # 15% chance to taunt (or 100% if forced)
+        if not force and random.random() > 0.15:
+            return
+
+        # Don't taunt if dragon is free (boss fight imminent)
+        player = self.game.get_player_data()
+        if player and player.current_round >= 21:
+            return
+
+        self.dragon_speech = random.choice(self.DRAGON_IDLE_TAUNTS)
+        self.dragon_speech_timer = 3.5
+        self.dragon_taunt_cooldown = 12.0  # At least 12 seconds between taunts
 
     def _draw_dragon_speech_bubble(self, surface: pygame.Surface, x: int, y: int) -> None:
         """Draw a speech bubble above the dragon."""

@@ -244,7 +244,7 @@ class ItemFactory:
             item.damage_bonus = 5 * mult
         elif item_type == ItemType.ARMOR:
             item.defense_bonus = int(3 * mult)
-            item.hp_bonus = int(15 * mult)
+            item.hp_bonus = int(40 * mult)
         else:
             item.crit_chance_bonus = 0.02 * mult
 

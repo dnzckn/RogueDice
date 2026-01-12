@@ -213,25 +213,11 @@ class GameService:
         # Store for deferred processing
         self._pending_square = move_result.square_component
         self._pending_result = result
+        self._pending_laps = move_result.laps_completed
 
-        # Check for lap completion (passed start square)
-        if move_result.laps_completed > 0:
-            # Heal 30% of max HP when passing start
-            heal_amount = int(player_stats.max_hp * 0.3)
-            actual_heal = player_stats.heal(heal_amount)
-            if actual_heal > 0:
-                result.healed = True
-                result.heal_amount = actual_heal
-
-            # Spawn boons FIRST so they get priority on EMPTY squares
-            result.boons_spawned = self._spawn_boons_on_pass_start()
-
-            # Then spawn monsters on remaining EMPTY squares
-            result.monsters_spawned = self._spawn_monsters_on_pass_start(player.current_round)
-
-            # Check for boss spawn
-            if player.current_round >= self.BOSS_SPAWN_ROUND and not player.boss_defeated:
-                self._spawn_boss()
+        # Check for lap completion (passed start square) - only process immediately if not deferred
+        if move_result.laps_completed > 0 and not defer_square_processing:
+            self._process_lap_completion(result, player, player_stats)
 
         # Process landing square (unless deferred for animation)
         if not defer_square_processing:
@@ -276,6 +262,12 @@ class GameService:
         player_stats = self.world.get_component(self.player_id, StatsComponent)
         result = self._pending_result
 
+        # Process lap completion (board refill) AFTER movement animation
+        pending_laps = getattr(self, '_pending_laps', 0)
+        if pending_laps > 0:
+            self._process_lap_completion(result, player, player_stats)
+            self._pending_laps = 0
+
         # Process landing square
         square = self._pending_square
         if square:
@@ -301,6 +293,25 @@ class GameService:
         self._pending_result = None
 
         return result
+
+    def _process_lap_completion(self, result: TurnResult, player: PlayerComponent, player_stats: StatsComponent) -> None:
+        """Process lap completion - heal, spawn boons, monsters, and boss."""
+        # Heal 30% of max HP when passing start
+        heal_amount = int(player_stats.max_hp * 0.3)
+        actual_heal = player_stats.heal(heal_amount)
+        if actual_heal > 0:
+            result.healed = True
+            result.heal_amount = actual_heal
+
+        # Spawn boons FIRST so they get priority on EMPTY squares
+        result.boons_spawned = self._spawn_boons_on_pass_start()
+
+        # Then spawn monsters on remaining EMPTY squares
+        result.monsters_spawned = self._spawn_monsters_on_pass_start(player.current_round)
+
+        # Check for boss spawn
+        if player.current_round >= self.BOSS_SPAWN_ROUND and not player.boss_defeated:
+            self._spawn_boss()
 
     def _spawn_boss(self) -> None:
         """Spawn the boss at the boss arena."""
