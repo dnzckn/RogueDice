@@ -4,6 +4,12 @@
 
 A roguelike board game where you roll dice, fight monsters, collect loot, and unlock permanent upgrades. Built with Python and Pygame.
 
+## Screenshots
+
+| Main Game | Battle Scene |
+|-----------|--------------|
+| ![Main UI](screenshots/rd_01.png) | ![Battle](screenshots/rd_00.png) |
+
 ## Features
 
 - **6 Unique Characters** - Each with different dice mechanics and playstyles

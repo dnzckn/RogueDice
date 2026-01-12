@@ -214,6 +214,16 @@ class GameService:
         if square:
             self._process_square(square, result, player, player_stats)
 
+        # Force boss fight at round 21+ if boss is active and not yet fought
+        if (player.current_round >= self.BOSS_SPAWN_ROUND and
+            self.boss_active and
+            not player.boss_defeated and
+            not result.combat_result):
+            # The dragon has awakened - force the confrontation!
+            boss_square = self.board_factory.get_square_at(30)
+            if boss_square and boss_square.monster_entity_id:
+                self._force_boss_fight(result, player, player_stats, boss_square)
+
         # Check game over
         if not player_stats.is_alive():
             self.is_game_over = True
@@ -240,6 +250,43 @@ class GameService:
                 boss_square.place_monster(boss_id)
                 self.boss_entity_id = boss_id
                 self.boss_active = True
+
+    def _force_boss_fight(
+        self,
+        result: TurnResult,
+        player: PlayerComponent,
+        player_stats: StatsComponent,
+        boss_square: 'BoardSquareComponent',
+    ) -> None:
+        """Force the boss fight - the dragon has broken free!"""
+        result.is_boss_fight = True
+
+        # Apply blessing bonuses
+        self._apply_blessing_combat_bonuses(player, player_stats)
+
+        # Combat with the boss!
+        combat_result = self.combat_system.run_full_combat(
+            self.player_id,
+            boss_square.monster_entity_id,
+        )
+        result.combat_result = combat_result
+
+        if combat_result.victory:
+            # Earn gold
+            result.gold_earned = combat_result.gold_earned
+            player.add_gold(combat_result.gold_earned)
+            player.monsters_killed += 1
+
+            # Clear the boss
+            self.world.destroy_entity(boss_square.monster_entity_id)
+            boss_square.clear_monster()
+
+            # Boss defeated!
+            player.boss_defeated = True
+            self.boss_active = False
+            self.is_victory = True
+            result.victory = True
+            self.persistent.record_boss_victory()
 
     def _process_square(
         self,

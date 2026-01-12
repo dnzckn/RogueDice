@@ -1,4 +1,4 @@
-"""Pygame-based pixel art game UI with polished graphics."""
+"""Pygame-based pixel art game UI with polished graphics and battle animations."""
 
 import pygame
 import sys
@@ -14,6 +14,7 @@ from ..models.enums import SquareType, Rarity, ItemType
 from ..models.persistent_data import UPGRADES
 from ..models.characters import CHARACTERS, get_character
 from .sprites import sprites, PALETTE, RARITY_SCHEMES
+from .battle_scene import BattleScene, BattleSpeed
 
 
 @dataclass
@@ -29,13 +30,20 @@ class DiceAnimation:
     """Dice rolling animation state."""
     active: bool = False
     timer: float = 0.0
-    duration: float = 1.0
+    duration: float = 1.2
     final_values: List[int] = None
     current_frame: int = 0
+    # Per-die animation state
+    die_offsets: List[Tuple[float, float]] = None  # x, y offsets for bounce
+    die_rotations: List[float] = None  # rotation angles
+    die_settled: List[bool] = None  # which dice have stopped
+    settle_times: List[float] = None  # when each die settles
+    show_total: bool = False
+    total_scale: float = 1.0
 
 
 class GameUI:
-    """Main game UI using pygame with polished pixel art."""
+    """Main game UI using pygame with polished pixel art and battle scenes."""
 
     WINDOW_WIDTH = 1024
     WINDOW_HEIGHT = 768
@@ -80,6 +88,10 @@ class GameUI:
         self.screen_shake = 0.0
         self.transition_alpha = 0
 
+        # Battle scene
+        self.battle_scene = BattleScene(self.WINDOW_WIDTH, self.WINDOW_HEIGHT)
+        self.pending_turn_result: Optional[TurnResult] = None
+
         # Cached surfaces
         self._bg_surface = None
         self._board_surface = None
@@ -108,6 +120,11 @@ class GameUI:
 
     def _handle_keydown(self, event: pygame.event.Event) -> None:
         """Handle key press events."""
+        # Handle battle scene input first
+        if self.battle_scene.is_active():
+            self._handle_battle_keys(event)
+            return
+
         if self.state == "character_select":
             self._handle_character_select_keys(event)
         elif self.state == "playing":
@@ -120,6 +137,23 @@ class GameUI:
             self._handle_game_over_keys(event)
         elif self.state == "victory":
             self._handle_victory_keys(event)
+        elif self.state == "settings":
+            self._handle_settings_keys(event)
+
+    def _handle_battle_keys(self, event: pygame.event.Event) -> None:
+        """Handle keys during battle animation."""
+        # Speed controls
+        if event.key == pygame.K_1:
+            self.battle_scene.set_speed(BattleSpeed.NORMAL)
+        elif event.key == pygame.K_2:
+            self.battle_scene.set_speed(BattleSpeed.FAST)
+        elif event.key == pygame.K_3:
+            self.battle_scene.set_speed(BattleSpeed.FASTER)
+        elif event.key == pygame.K_4:
+            self.battle_scene.set_speed(BattleSpeed.INSTANT)
+        elif event.key == pygame.K_SPACE:
+            # SPACE immediately finishes the battle
+            self._finish_battle()
 
     def _handle_character_select_keys(self, event: pygame.event.Event) -> None:
         """Handle keys in character select screen."""
@@ -179,6 +213,8 @@ class GameUI:
             self.message_log = self.message_log[-8:]
         elif event.key == pygame.K_r and self.game.is_game_over:
             self.state = "game_over"
+        elif event.key == pygame.K_ESCAPE:
+            self.state = "settings"
 
     def _handle_item_choice_keys(self, event: pygame.event.Event) -> None:
         """Handle keys when choosing to equip or sell an item."""
@@ -273,6 +309,19 @@ class GameUI:
             self.game.end_run()
             self.state = "game_over"
 
+    def _handle_settings_keys(self, event: pygame.event.Event) -> None:
+        """Handle keys in settings menu."""
+        if event.key == pygame.K_ESCAPE:
+            self.state = "playing"
+        elif event.key == pygame.K_1:
+            self.battle_scene.set_speed(BattleSpeed.NORMAL)
+        elif event.key == pygame.K_2:
+            self.battle_scene.set_speed(BattleSpeed.FAST)
+        elif event.key == pygame.K_3:
+            self.battle_scene.set_speed(BattleSpeed.FASTER)
+        elif event.key == pygame.K_4:
+            self.battle_scene.set_speed(BattleSpeed.INSTANT)
+
     def _take_turn(self) -> None:
         """Execute a turn with dice animation."""
         if self.game.is_game_over:
@@ -282,15 +331,28 @@ class GameUI:
             self.state = "victory"
             return
 
+        # Clear combat log from previous fight
+        self.combat_log = []
+
         result = self.game.take_turn()
         self.last_turn_result = result
+
+        # Initialize per-die animation data
+        num_dice = len(result.move_result.rolls)
+        settle_times = [0.4 + i * 0.15 for i in range(num_dice)]  # Staggered settling
 
         # Start dice animation
         self.dice_anim = DiceAnimation(
             active=True,
             timer=0,
-            duration=0.8,
+            duration=max(settle_times) + 0.4,  # Extra time after last die settles
             final_values=result.move_result.rolls,
+            die_offsets=[(0.0, 0.0) for _ in range(num_dice)],
+            die_rotations=[random.uniform(0, 360) for _ in range(num_dice)],
+            die_settled=[False for _ in range(num_dice)],
+            settle_times=settle_times,
+            show_total=False,
+            total_scale=0.0,
         )
 
         # Reset cached board
@@ -298,18 +360,88 @@ class GameUI:
 
         self.message_log.append(f"Rolled {result.move_result.roll_text}!")
 
+        # Check for combat - start battle scene
         if result.combat_result:
-            self.combat_log = result.combat_result.log[-10:]
-            self.screen_shake = 0.3
-            if result.combat_result.victory:
-                msg = f"Victory! +{result.gold_earned}g"
-                if result.is_boss_fight:
-                    msg = "BOSS DEFEATED! " + msg
-                    self._add_particles(300, 300, PALETTE['gold'], 30)
-                self.message_log.append(msg)
-            else:
-                self.message_log.append("Defeated!")
+            self.pending_turn_result = result
+            self._start_battle(result)
+            return  # Don't process rest until battle finishes
 
+        # Process non-combat results immediately
+        self._process_turn_result(result)
+
+    def _start_battle(self, result: TurnResult) -> None:
+        """Start the Pokemon-style battle scene."""
+        player = self.game.get_player_data()
+        stats = self.game.get_player_stats()
+
+        if not player or not stats or not result.combat_result:
+            return
+
+        is_boss = result.is_boss_fight
+
+        # Get monster name from combat result
+        monster_name = result.combat_result.monster_name or "Monster"
+
+        # Map monster name to sprite type
+        monster_type_map = {
+            "goblin": "goblin", "skeleton warrior": "skeleton", "skeleton": "skeleton",
+            "dire wolf": "wolf", "wolf": "wolf", "giant spider": "spider", "spider": "spider",
+            "orc brute": "orc", "orc": "orc", "cave troll": "troll", "troll": "troll",
+            "lesser demon": "demon", "demon": "demon", "vampire lord": "vampire", "vampire": "vampire",
+            "lich king": "lich", "lich": "lich", "ancient dragon": "dragon", "dragon": "dragon",
+            "slime": "slime", "bat": "bat", "ghost": "ghost", "zombie": "zombie",
+        }
+        monster_type = monster_type_map.get(monster_name.lower(), "goblin")
+
+        if is_boss:
+            monster_type = "dragon"
+            monster_name = "Ancient Dragon"
+
+        # Get monster HP from combat result if available
+        monster_max_hp = 50 + player.current_round * 10
+        if is_boss:
+            monster_max_hp = 200 + player.current_round * 20
+
+        # Start battle scene
+        self.battle_scene.start_battle(
+            char_id=player.character_id,
+            monster_type=monster_type,
+            monster_name=monster_name,
+            is_boss=is_boss,
+            combat_result=result.combat_result,
+            player_max_hp=stats.max_hp,
+            monster_max_hp=monster_max_hp,
+            player_start_hp=stats.current_hp + result.combat_result.damage_taken,  # HP before damage
+            monster_start_hp=monster_max_hp,
+        )
+
+    def _finish_battle(self) -> None:
+        """Finish battle and process turn result."""
+        self.battle_scene.dismiss()
+
+        if self.pending_turn_result:
+            result = self.pending_turn_result
+            self.pending_turn_result = None
+
+            # Add combat results to log
+            self.combat_log = result.combat_result.log[-10:] if result.combat_result else []
+            self.screen_shake = 0.3
+
+            if result.combat_result:
+                if result.combat_result.victory:
+                    msg = f"Victory! +{result.gold_earned}g"
+                    if result.is_boss_fight:
+                        msg = "BOSS DEFEATED! " + msg
+                        self._add_particles(300, 300, PALETTE['gold'], 30)
+                    self.message_log.append(msg)
+                else:
+                    self.message_log.append("Defeated!")
+
+            # Process other results
+            self._process_turn_result(result)
+
+    def _process_turn_result(self, result: TurnResult) -> None:
+        """Process non-combat turn results."""
         if result.blessing_received:
             self.message_log.append(f"Blessing: {result.blessing_received.name}")
             self._add_particles(300, 200, PALETTE['purple'], 15)
@@ -343,6 +475,11 @@ class GameUI:
 
     def _update(self, dt: float) -> None:
         """Update game state and animations."""
+        # Update battle scene if active
+        if self.battle_scene.is_active():
+            self.battle_scene.update(dt)
+            return
+
         # Check for hovered item slot
         self.hovered_slot = None
         for slot in self.item_slots:
@@ -354,6 +491,35 @@ class GameUI:
         if self.dice_anim.active:
             self.dice_anim.timer += dt
             self.dice_anim.current_frame = int(self.dice_anim.timer * 15) % 6 + 1
+
+            # Update per-die animations
+            if self.dice_anim.die_offsets and self.dice_anim.settle_times:
+                for i in range(len(self.dice_anim.final_values)):
+                    if self.dice_anim.timer < self.dice_anim.settle_times[i]:
+                        # Die is still rolling - add bounce and shake
+                        bounce = math.sin(self.dice_anim.timer * 20 + i * 2) * 8
+                        shake_x = random.uniform(-3, 3)
+                        shake_y = random.uniform(-3, 3)
+                        self.dice_anim.die_offsets[i] = (shake_x, bounce + shake_y)
+                        self.dice_anim.die_rotations[i] += dt * 400  # Spin
+                    elif not self.dice_anim.die_settled[i]:
+                        # Die just settled - snap to position and add particles
+                        self.dice_anim.die_settled[i] = True
+                        self.dice_anim.die_offsets[i] = (0.0, 0.0)
+                        # Add landing particles
+                        dice_x = 180 - (len(self.dice_anim.final_values) * 58) // 2 + i * 58 + 24
+                        self._add_particles(dice_x, 304, PALETTE['gold'], 5)
+
+                # Show total after all dice settle
+                if all(self.dice_anim.die_settled) and not self.dice_anim.show_total:
+                    self.dice_anim.show_total = True
+                    # Add celebration particles for total
+                    self._add_particles(280, 310, PALETTE['gold'], 10)
+
+                # Animate total scale
+                if self.dice_anim.show_total and self.dice_anim.total_scale < 1.0:
+                    self.dice_anim.total_scale = min(1.0, self.dice_anim.total_scale + dt * 4)
+
             if self.dice_anim.timer >= self.dice_anim.duration:
                 self.dice_anim.active = False
 
@@ -395,11 +561,15 @@ class GameUI:
             if self.combat_log:
                 self._draw_combat_log(offset_surface)
 
-            # Draw dice animation
-            if self.dice_anim.active or (self.last_turn_result and self.dice_anim.timer < 2):
+            # Draw dice animation (but not during battle)
+            if not self.battle_scene.is_active() and (self.dice_anim.active or (self.last_turn_result and self.dice_anim.timer < 2)):
                 self._draw_dice_result(offset_surface)
 
             self.screen.blit(offset_surface, (shake_x, shake_y))
+
+            # Draw battle scene (in corner panel, over game but under overlays)
+            if self.battle_scene.is_active():
+                self.battle_scene.draw(self.screen)
 
             # Overlays (no shake)
             if self.state == "item_choice":
@@ -410,6 +580,8 @@ class GameUI:
                 self._draw_game_over()
             elif self.state == "victory":
                 self._draw_victory()
+            elif self.state == "settings":
+                self._draw_settings()
 
             # Draw tooltip last
             if self.hovered_slot and self.hovered_slot.item_id:
@@ -450,11 +622,26 @@ class GameUI:
         pygame.draw.rect(surface, PALETTE['wood_dark'],
                         (board_x, board_y, self.BOARD_SIZE, self.BOARD_SIZE))
 
-        # Inner area
+        # Inner area - dark dungeon stone instead of grass
         inner_margin = self.SQUARE_SIZE
-        pygame.draw.rect(surface, PALETTE['grass_dark'],
-                        (board_x + inner_margin, board_y + inner_margin,
-                         self.BOARD_SIZE - inner_margin * 2, self.BOARD_SIZE - inner_margin * 2))
+        inner_x = board_x + inner_margin
+        inner_y = board_y + inner_margin
+        inner_size = self.BOARD_SIZE - inner_margin * 2
+
+        # Dark stone background with subtle pattern (cached to prevent flickering)
+        if not hasattr(self, '_stone_surface') or self._stone_surface is None:
+            self._stone_surface = pygame.Surface((inner_size, inner_size))
+            self._stone_surface.fill((25, 22, 30))
+            for tx in range(0, inner_size, 20):
+                for ty in range(0, inner_size, 20):
+                    shade = random.randint(-5, 5)
+                    color = (30 + shade, 27 + shade, 35 + shade)
+                    pygame.draw.rect(self._stone_surface, color, (tx, ty, 19, 19))
+                    pygame.draw.rect(self._stone_surface, (20, 18, 25), (tx, ty, 19, 19), 1)
+        surface.blit(self._stone_surface, (inner_x, inner_y))
+
+        # Draw the chained dragon boss in center
+        self._draw_chained_boss(surface, board_x, board_y)
 
         # Draw squares
         squares = self.game.get_board_squares()
@@ -474,17 +661,92 @@ class GameUI:
             num_text = self.font_tiny.render(str(square.index), True, (200, 200, 200))
             surface.blit(num_text, (x + 2, y + 2))
 
-        # Center title with glow
-        title_text = "ROGUE DICE"
-        # Glow
-        for offset in [(1, 1), (-1, -1), (1, -1), (-1, 1)]:
-            glow = self.font_large.render(title_text, True, PALETTE['gold_dark'])
-            surface.blit(glow, (board_x + self.BOARD_SIZE // 2 - 70 + offset[0],
-                               board_y + self.BOARD_SIZE // 2 - 15 + offset[1]))
-        # Main text
-        title = self.font_large.render(title_text, True, PALETTE['gold'])
-        surface.blit(title, (board_x + self.BOARD_SIZE // 2 - 70,
-                            board_y + self.BOARD_SIZE // 2 - 15))
+    def _draw_chained_boss(self, surface: pygame.Surface, board_x: int, board_y: int) -> None:
+        """Draw the chained dragon boss in the board center."""
+        center_x = board_x + self.BOARD_SIZE // 2
+        center_y = board_y + self.BOARD_SIZE // 2
+
+        player = self.game.get_player_data()
+        current_round = player.current_round if player else 1
+        boss_round = 21  # Boss breaks free at round 21
+
+        # Calculate chains remaining (all 8 chains break by round 21)
+        total_chains = 8
+        # Linear progression: lose ~1 chain every 2.5 rounds
+        chains_broken = min(total_chains, (current_round * total_chains) // boss_round)
+        chains_remaining = total_chains - chains_broken
+
+        # Dragon sprite size
+        dragon_size = 120
+
+        # Get dragon sprite
+        dragon = sprites.create_monster_sprite("dragon", dragon_size, is_boss=True)
+
+        # Darken the dragon if still chained
+        if chains_remaining > 0:
+            dark_overlay = pygame.Surface((dragon_size, dragon_size), pygame.SRCALPHA)
+            dark_overlay.fill((0, 0, 0, 80))
+            dragon.blit(dark_overlay, (0, 0))
+
+        # Draw dragon
+        dragon_x = center_x - dragon_size // 2
+        dragon_y = center_y - dragon_size // 2 - 10
+        surface.blit(dragon, (dragon_x, dragon_y))
+
+        # Draw chains around the dragon
+        chain_color = (100, 90, 80)
+        chain_broken_color = (60, 55, 50, 100)
+        chain_positions = [
+            (center_x - 70, center_y - 40),  # Top-left
+            (center_x + 70, center_y - 40),  # Top-right
+            (center_x - 80, center_y),       # Left
+            (center_x + 80, center_y),       # Right
+            (center_x - 70, center_y + 40),  # Bottom-left
+            (center_x + 70, center_y + 40),  # Bottom-right
+            (center_x - 40, center_y - 70),  # Top-left-up
+            (center_x + 40, center_y - 70),  # Top-right-up
+        ]
+
+        for i, (cx, cy) in enumerate(chain_positions):
+            is_intact = i < chains_remaining
+
+            if is_intact:
+                # Draw intact chain link
+                pygame.draw.circle(surface, chain_color, (int(cx), int(cy)), 8, 3)
+                pygame.draw.circle(surface, (140, 130, 120), (int(cx), int(cy)), 5, 2)
+                # Draw chain line to dragon
+                pygame.draw.line(surface, chain_color, (int(cx), int(cy)),
+                               (center_x, center_y), 2)
+            else:
+                # Draw broken chain (faded, broken link)
+                broken_surf = pygame.Surface((20, 20), pygame.SRCALPHA)
+                pygame.draw.arc(broken_surf, (80, 70, 60, 120), (2, 2, 16, 16),
+                              0.5, 2.5, 2)
+                surface.blit(broken_surf, (int(cx) - 10, int(cy) - 10))
+
+        # Status text
+        if chains_remaining > 0:
+            # Chains remaining indicator
+            status_text = f"{chains_remaining} chains remain"
+            status_color = PALETTE['gold'] if chains_remaining <= 2 else PALETTE['gray_light']
+
+            # Pulsing effect when low on chains
+            if chains_remaining <= 2:
+                pulse = (math.sin(pygame.time.get_ticks() / 200) + 1) / 2
+                status_color = (
+                    int(255 * (0.7 + 0.3 * pulse)),
+                    int(100 * (0.7 + 0.3 * pulse)),
+                    int(50 * (0.7 + 0.3 * pulse))
+                )
+
+            text = self.font_small.render(status_text, True, status_color)
+            surface.blit(text, (center_x - text.get_width() // 2, center_y + 55))
+        else:
+            # Boss is free!
+            pulse = (math.sin(pygame.time.get_ticks() / 150) + 1) / 2
+            free_color = (int(255 * (0.8 + 0.2 * pulse)), int(50 + 50 * pulse), 50)
+            free_text = self.font_medium.render("THE DRAGON AWAKENS!", True, free_color)
+            surface.blit(free_text, (center_x - free_text.get_width() // 2, center_y + 55))
 
     def _get_square_position(self, index: int, bx: int, by: int) -> Tuple[int, int]:
         """Get pixel position for a square index."""
@@ -500,32 +762,92 @@ class GameUI:
             return (bx, by + self.BOARD_SIZE - (index - 30) * self.SQUARE_SIZE - self.SQUARE_SIZE)
 
     def _draw_dice_result(self, surface: pygame.Surface) -> None:
-        """Draw dice animation/result."""
+        """Draw dice animation/result with enhanced visuals."""
         if not self.last_turn_result:
             return
 
         rolls = self.last_turn_result.move_result.rolls
-        dice_size = 48
-        start_x = 180 - (len(rolls) * (dice_size + 10)) // 2
-        y = 280
+        dice_size = 52
+        gap = 6
+        total_width = len(rolls) * dice_size + (len(rolls) - 1) * gap
+        start_x = 180 - total_width // 2
+        base_y = 280
 
+        # Draw dice tray background
+        tray_padding = 15
+        tray_x = start_x - tray_padding
+        tray_y = base_y - tray_padding
+        tray_w = total_width + tray_padding * 2
+        tray_h = dice_size + tray_padding * 2 + 35  # Extra space for total
+
+        # Tray with felt texture
+        tray_surf = pygame.Surface((tray_w, tray_h), pygame.SRCALPHA)
+        pygame.draw.rect(tray_surf, (40, 25, 20), (0, 0, tray_w, tray_h), border_radius=10)
+        pygame.draw.rect(tray_surf, (60, 35, 25), (3, 3, tray_w - 6, tray_h - 6), border_radius=8)
+        # Felt interior
+        pygame.draw.rect(tray_surf, (30, 60, 30), (6, 6, tray_w - 12, tray_h - 12), border_radius=6)
+        pygame.draw.rect(tray_surf, (25, 50, 25), (8, 8, tray_w - 16, tray_h - 16), border_radius=5)
+        surface.blit(tray_surf, (tray_x, tray_y))
+
+        # Draw each die
         for i, value in enumerate(rolls):
-            x = start_x + i * (dice_size + 10)
+            x = start_x + i * (dice_size + gap)
+            y = base_y
 
-            if self.dice_anim.active:
-                # Show random value during animation
+            # Get animation offset
+            offset_x, offset_y = 0.0, 0.0
+            is_settled = True
+            if self.dice_anim.active and self.dice_anim.die_offsets:
+                offset_x, offset_y = self.dice_anim.die_offsets[i]
+                is_settled = self.dice_anim.die_settled[i] if self.dice_anim.die_settled else False
+
+            # Determine display value
+            if self.dice_anim.active and not is_settled:
                 display_val = random.randint(1, 6)
-                dice = sprites.create_dice(dice_size, display_val, "d6", rolling=True)
+                rolling = True
             else:
-                dice = sprites.create_dice(dice_size, value, "d6", rolling=False)
+                display_val = value
+                rolling = False
 
-            surface.blit(dice, (x, y))
+            # Create dice sprite
+            dice = sprites.create_dice(dice_size, display_val, "d6", rolling=rolling)
 
-        # Show total
-        if not self.dice_anim.active:
+            # Apply offset
+            draw_x = int(x + offset_x)
+            draw_y = int(y + offset_y)
+
+            # Add glow for settled dice
+            if is_settled and not rolling:
+                glow_surf = pygame.Surface((dice_size + 8, dice_size + 8), pygame.SRCALPHA)
+                pygame.draw.rect(glow_surf, (255, 200, 50, 60),
+                               (0, 0, dice_size + 8, dice_size + 8), border_radius=10)
+                surface.blit(glow_surf, (draw_x - 4, draw_y - 4))
+
+            surface.blit(dice, (draw_x, draw_y))
+
+        # Show total with animation
+        show_total = (not self.dice_anim.active) or (self.dice_anim.show_total if self.dice_anim.active else False)
+        if show_total:
             total = self.last_turn_result.move_result.total
-            total_text = self.font_large.render(f"= {total}", True, PALETTE['gold'])
-            surface.blit(total_text, (start_x + len(rolls) * (dice_size + 10), y + 10))
+            scale = self.dice_anim.total_scale if self.dice_anim.active else 1.0
+
+            # Create scaled total text
+            base_font_size = 42
+            scaled_size = int(base_font_size * (0.5 + 0.5 * scale))
+            total_font = pygame.font.Font(None, scaled_size)
+
+            # Pulsing glow effect
+            pulse = (math.sin(pygame.time.get_ticks() / 150) + 1) / 2
+            glow_color = (255, int(180 + 40 * pulse), int(50 + 30 * pulse))
+
+            total_text = total_font.render(f"= {total}", True, glow_color)
+            total_x = start_x + total_width // 2 - total_text.get_width() // 2
+            total_y = base_y + dice_size + 8
+
+            # Shadow
+            shadow = total_font.render(f"= {total}", True, (0, 0, 0))
+            surface.blit(shadow, (total_x + 2, total_y + 2))
+            surface.blit(total_text, (total_x, total_y))
 
     def _draw_player_panel(self, surface: pygame.Surface) -> None:
         """Draw player stats panel with polished graphics."""
@@ -602,8 +924,8 @@ class GameUI:
         surface.blit(s2_text, (x + 15, y + 102))
 
         # Controls hint
-        ctrl_text = self.font_tiny.render("[SPACE] Roll", True, PALETTE['gray'])
-        surface.blit(ctrl_text, (x + 330, y + 108))
+        ctrl_text = self.font_tiny.render("[SPACE] Roll  [ESC] Settings", True, PALETTE['gray'])
+        surface.blit(ctrl_text, (x + 280, y + 108))
 
     def _draw_equipment_slots(self, surface: pygame.Surface) -> None:
         """Draw equipment slots with polished item icons."""
@@ -660,9 +982,9 @@ class GameUI:
                 icon = sprites.create_item_icon(item_type, rarity, item.level, 40)
                 surface.blit(icon, (sx + 15, sy + 8))
 
-                # Tier text
+                # Tier text (bottom-left to avoid frame overlap)
                 tier_text = self.font_medium.render(f"T{item.level}", True, colors[2])
-                surface.blit(tier_text, (sx + slot_size - 25, sy + slot_size - 20))
+                surface.blit(tier_text, (sx + 5, sy + slot_size - 20))
             else:
                 # Empty slot indicator
                 empty_text = self.font_medium.render("---", True, PALETTE['gray'])
@@ -813,48 +1135,50 @@ class GameUI:
             self.screen.blit(surf, (int(p['x']) - size, int(p['y']) - size))
 
     def _draw_item_choice(self) -> None:
-        """Draw item choice overlay with polished graphics."""
+        """Draw item choice panel in bottom-left corner (non-intrusive)."""
         if not self.pending_item_id:
             return
         item = self.game.get_item(self.pending_item_id)
         if not item:
             return
 
-        # Overlay
-        overlay = pygame.Surface((self.WINDOW_WIDTH, self.WINDOW_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 200))
-        self.screen.blit(overlay, (0, 0))
-
-        w, h = 400, 300
-        x = (self.WINDOW_WIDTH - w) // 2
-        y = (self.WINDOW_HEIGHT - h) // 2
+        # Panel in bottom-left corner (below the board)
+        w, h = 520, 220
+        x, y = 20, self.WINDOW_HEIGHT - h - 10
 
         colors = RARITY_SCHEMES.get(item.rarity, RARITY_SCHEMES[Rarity.COMMON])
 
-        # Panel
+        # Panel background
         panel = sprites.create_panel(w, h, "gold")
         self.screen.blit(panel, (x, y))
 
-        # Glowing border
+        # Rarity glow border
         pygame.draw.rect(self.screen, colors[0], (x, y, w, h), 3, border_radius=6)
 
-        # Title
-        title = self.font_large.render("ITEM FOUND!", True, PALETTE['gold'])
-        self.screen.blit(title, (x + w // 2 - 80, y + 20))
+        # Title bar
+        title = self.font_medium.render("ITEM FOUND!", True, PALETTE['gold'])
+        self.screen.blit(title, (x + 10, y + 8))
 
-        # Item icon
-        icon = sprites.create_item_icon(item.item_type, item.rarity, item.level, 64)
-        self.screen.blit(icon, (x + 30, y + 70))
+        # Item icon with rarity glow
+        icon_size = 56
+        icon = sprites.create_item_icon(item.item_type, item.rarity, item.level, icon_size)
+        icon_x, icon_y = x + 15, y + 38
+        self.screen.blit(icon, (icon_x, icon_y))
 
-        # Item info
+        # New item info (right of icon)
+        info_x = icon_x + icon_size + 15
         name_text = self.font_medium.render(item.display_name, True, colors[0])
-        self.screen.blit(name_text, (x + 110, y + 75))
+        self.screen.blit(name_text, (info_x, y + 38))
 
-        stats_text = self.font_small.render(item.stat_summary, True, PALETTE['cream'])
-        self.screen.blit(stats_text, (x + 110, y + 100))
+        # Stats on one line
+        stats_text = self.font_small.render(item.stat_summary[:50], True, PALETTE['cream'])
+        self.screen.blit(stats_text, (info_x, y + 58))
 
-        sell_text = self.font_medium.render(f"Sell value: {item.sell_value}g", True, PALETTE['gold'])
-        self.screen.blit(sell_text, (x + 110, y + 125))
+        sell_text = self.font_small.render(f"Value: {item.sell_value}g", True, PALETTE['gold'])
+        self.screen.blit(sell_text, (info_x, y + 76))
+
+        # Divider line
+        pygame.draw.line(self.screen, PALETTE['panel_border'], (x + 10, y + 100), (x + w - 10, y + 100), 1)
 
         # Current equipment comparison
         equipment = self.game.get_player_equipment()
@@ -867,27 +1191,90 @@ class GameUI:
             else:
                 current_id = equipment.ring
 
+        compare_y = y + 108
         if current_id:
             current = self.game.get_item(current_id)
             if current:
-                curr_text = self.font_small.render(f"Current: {current.display_name}", True, PALETTE['gray'])
-                self.screen.blit(curr_text, (x + 30, y + 170))
-                sell_curr = self.font_small.render(f"(sells for {current.sell_value}g)", True, PALETTE['gray'])
-                self.screen.blit(sell_curr, (x + 30, y + 190))
+                # Current item icon (smaller)
+                curr_icon = sprites.create_item_icon(current.item_type, current.rarity, current.level, 32)
+                self.screen.blit(curr_icon, (x + 15, compare_y))
+
+                curr_colors = RARITY_SCHEMES.get(current.rarity, RARITY_SCHEMES[Rarity.COMMON])
+                curr_text = self.font_small.render(f"Current: {current.display_name}", True, curr_colors[0])
+                self.screen.blit(curr_text, (x + 55, compare_y + 2))
+
+                # Show stat comparison with colored deltas
+                stat_changes = self._get_stat_comparison(item, current)
+                stat_x = x + 55
+                for stat_text, stat_color in stat_changes:
+                    rendered = self.font_small.render(stat_text, True, stat_color)
+                    self.screen.blit(rendered, (stat_x, compare_y + 18))
+                    stat_x += rendered.get_width() + 10  # spacing between stats
         else:
-            empty_text = self.font_small.render("Current: (empty slot)", True, PALETTE['gray'])
-            self.screen.blit(empty_text, (x + 30, y + 170))
+            empty_text = self.font_small.render("Slot: Empty (equip for free!)", True, PALETTE['green'])
+            self.screen.blit(empty_text, (x + 15, compare_y + 8))
 
-        # Buttons
-        equip_btn = sprites.create_button(150, 40, False, "gold")
-        self.screen.blit(equip_btn, (x + 40, y + 230))
+        # Action buttons at bottom
+        btn_y = y + h - 45
+        btn_w = 120
+
+        # Equip button
+        equip_btn = sprites.create_button(btn_w, 32, False, "gold")
+        self.screen.blit(equip_btn, (x + 80, btn_y))
         equip_text = self.font_medium.render("[E] Equip", True, PALETTE['black'])
-        self.screen.blit(equip_text, (x + 75, y + 240))
+        self.screen.blit(equip_text, (x + 105, btn_y + 7))
 
-        sell_btn = sprites.create_button(150, 40, False, "default")
-        self.screen.blit(sell_btn, (x + 210, y + 230))
-        sell_text = self.font_medium.render(f"[S] Sell {item.sell_value}g", True, PALETTE['gold'])
-        self.screen.blit(sell_text, (x + 230, y + 240))
+        # Sell button
+        sell_btn = sprites.create_button(btn_w + 30, 32, False, "default")
+        self.screen.blit(sell_btn, (x + 220, btn_y))
+        sell_txt = self.font_medium.render(f"[S] Sell +{item.sell_value}g", True, PALETTE['gold'])
+        self.screen.blit(sell_txt, (x + 235, btn_y + 7))
+
+        # Quick hint
+        hint = self.font_tiny.render("Pick up loot without interrupting gameplay!", True, PALETTE['gray'])
+        self.screen.blit(hint, (x + w - 220, y + 8))
+
+    def _get_stat_comparison(self, new_item, current_item) -> list:
+        """Generate stat comparison as list of (text, color) tuples."""
+        changes = []
+
+        diff_dmg = new_item.damage_bonus - current_item.damage_bonus
+        diff_def = new_item.defense_bonus - current_item.defense_bonus
+        diff_hp = new_item.hp_bonus - current_item.hp_bonus
+        diff_spd = new_item.attack_speed_bonus - current_item.attack_speed_bonus
+        diff_crit = new_item.crit_chance_bonus - current_item.crit_chance_bonus
+        diff_ls = new_item.life_steal_bonus - current_item.life_steal_bonus
+
+        def get_color(val):
+            if val > 0:
+                return PALETTE['green']
+            elif val < 0:
+                return PALETTE['red']
+            return PALETTE['gray']
+
+        if diff_dmg != 0:
+            sign = "+" if diff_dmg > 0 else ""
+            changes.append((f"DMG:{sign}{diff_dmg:.0f}", get_color(diff_dmg)))
+        if diff_def != 0:
+            sign = "+" if diff_def > 0 else ""
+            changes.append((f"DEF:{sign}{diff_def}", get_color(diff_def)))
+        if diff_hp != 0:
+            sign = "+" if diff_hp > 0 else ""
+            changes.append((f"HP:{sign}{diff_hp}", get_color(diff_hp)))
+        if abs(diff_spd) > 0.01:
+            sign = "+" if diff_spd > 0 else ""
+            changes.append((f"SPD:{sign}{diff_spd:.2f}", get_color(diff_spd)))
+        if abs(diff_crit) > 0.001:
+            sign = "+" if diff_crit > 0 else ""
+            changes.append((f"CRIT:{sign}{diff_crit*100:.0f}%", get_color(diff_crit)))
+        if abs(diff_ls) > 0.001:
+            sign = "+" if diff_ls > 0 else ""
+            changes.append((f"LS:{sign}{diff_ls*100:.0f}%", get_color(diff_ls)))
+
+        if not changes:
+            return [("No stat change", PALETTE['gray'])]
+
+        return changes[:5]  # Limit to 5 stats
 
     def _draw_merchant(self) -> None:
         """Draw merchant shop overlay."""
@@ -1082,6 +1469,59 @@ class GameUI:
         self.screen.blit(end_btn, (self.WINDOW_WIDTH // 2 - 125, cy + 90))
         end_text = self.font_medium.render("[E] End & Collect Rewards", True, PALETTE['black'])
         self.screen.blit(end_text, (self.WINDOW_WIDTH // 2 - 105, cy + 102))
+
+    def _draw_settings(self) -> None:
+        """Draw settings overlay."""
+        overlay = pygame.Surface((self.WINDOW_WIDTH, self.WINDOW_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 180))
+        self.screen.blit(overlay, (0, 0))
+
+        w, h = 350, 280
+        x = (self.WINDOW_WIDTH - w) // 2
+        y = (self.WINDOW_HEIGHT - h) // 2
+
+        panel = sprites.create_panel(w, h, "default")
+        self.screen.blit(panel, (x, y))
+
+        # Title
+        title = self.font_large.render("SETTINGS", True, PALETTE['gold'])
+        self.screen.blit(title, (x + w // 2 - 60, y + 15))
+
+        # Battle Speed section
+        speed_label = self.font_medium.render("Battle Animation Speed:", True, PALETTE['cream'])
+        self.screen.blit(speed_label, (x + 25, y + 60))
+
+        speeds = [
+            (BattleSpeed.NORMAL, "1x Normal", "1"),
+            (BattleSpeed.FAST, "2x Fast", "2"),
+            (BattleSpeed.FASTER, "4x Faster", "3"),
+            (BattleSpeed.INSTANT, "Instant", "4"),
+        ]
+
+        current_speed = self.battle_scene.speed
+        for i, (speed, label, key) in enumerate(speeds):
+            btn_y = y + 95 + i * 38
+            is_selected = current_speed == speed
+
+            # Radio button style
+            btn_color = "gold" if is_selected else "default"
+            btn = sprites.create_button(280, 30, is_selected, btn_color)
+            self.screen.blit(btn, (x + 35, btn_y))
+
+            # Radio circle
+            circle_color = PALETTE['gold'] if is_selected else PALETTE['gray']
+            pygame.draw.circle(self.screen, circle_color, (x + 55, btn_y + 15), 8, 2)
+            if is_selected:
+                pygame.draw.circle(self.screen, PALETTE['gold'], (x + 55, btn_y + 15), 4)
+
+            # Label
+            text_color = PALETTE['black'] if is_selected else PALETTE['cream']
+            text = self.font_medium.render(f"[{key}] {label}", True, text_color)
+            self.screen.blit(text, (x + 75, btn_y + 5))
+
+        # Close hint
+        close_text = self.font_medium.render("[ESC] Close", True, PALETTE['gray'])
+        self.screen.blit(close_text, (x + w // 2 - 45, y + h - 40))
 
     def _draw_character_select(self) -> None:
         """Draw character selection screen with portraits."""
