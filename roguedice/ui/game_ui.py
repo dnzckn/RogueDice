@@ -42,6 +42,17 @@ class DiceAnimation:
     total_scale: float = 1.0
 
 
+@dataclass
+class PlayerMovement:
+    """Player token movement animation state."""
+    current_pos: int = 0  # Current visual position (square index)
+    target_pos: int = 0   # Target position to move to
+    progress: float = 1.0  # 0.0 = at current_pos, 1.0 = at target_pos
+    path: List[int] = None  # Squares to traverse
+    path_index: int = 0  # Current index in path
+    hop_height: float = 0.0  # Current hop height for bounce effect
+
+
 class GameUI:
     """Main game UI using pygame with polished pixel art and battle scenes."""
 
@@ -84,6 +95,7 @@ class GameUI:
 
         # Animations
         self.dice_anim = DiceAnimation()
+        self.player_movement = PlayerMovement()
         self.particle_effects: List[Dict] = []
         self.screen_shake = 0.0
         self.transition_alpha = 0
@@ -192,6 +204,17 @@ class GameUI:
         self.game.new_game(character_id=char_id)
         self.state = "playing"
         self._board_surface = None  # Reset cached board
+        self._stone_surface = None  # Reset stone surface cache
+        sprites.clear_cache("dragon")  # Clear dragon sprites to use updated drawing
+        # Initialize player movement at starting position
+        start_pos = self.game.get_player_position() or 0
+        self.player_movement = PlayerMovement(
+            current_pos=start_pos,
+            target_pos=start_pos,
+            progress=1.0,
+            path=None,
+            path_index=0
+        )
         char = CHARACTERS[char_id]
         self.message_log = [
             f"Playing as {char.name}!",
@@ -334,8 +357,28 @@ class GameUI:
         # Clear combat log from previous fight
         self.combat_log = []
 
+        # Get starting position before the turn
+        start_pos = self.game.get_player_position() or 0
+
         result = self.game.take_turn()
         self.last_turn_result = result
+
+        # Calculate movement path (square by square around the board)
+        end_pos = self.game.get_player_position() or 0
+        total_move = result.move_result.total
+        path = []
+        for i in range(total_move + 1):
+            path.append((start_pos + i) % 40)
+
+        # Start player movement animation
+        self.player_movement = PlayerMovement(
+            current_pos=start_pos,
+            target_pos=end_pos,
+            progress=0.0,
+            path=path,
+            path_index=0,
+            hop_height=0.0
+        )
 
         # Initialize per-die animation data
         num_dice = len(result.move_result.rolls)
@@ -448,6 +491,12 @@ class GameUI:
         if result.healed:
             self.message_log.append("Rested! HP restored.")
             self._add_particles(300, 200, PALETTE['green'], 15)
+        if result.monsters_spawned:
+            # Curse triggered!
+            num = len(result.monsters_spawned)
+            self.message_log.append(f"CURSED! {num} monsters spawned!")
+            self._add_particles(300, 200, (150, 50, 180), 20)  # Purple particles
+            self.screen_shake = 0.4
         if result.opened_merchant:
             self.state = "merchant"
         if result.pending_item:
@@ -507,14 +556,14 @@ class GameUI:
                         self.dice_anim.die_settled[i] = True
                         self.dice_anim.die_offsets[i] = (0.0, 0.0)
                         # Add landing particles
-                        dice_x = 180 - (len(self.dice_anim.final_values) * 58) // 2 + i * 58 + 24
-                        self._add_particles(dice_x, 304, PALETTE['gold'], 5)
+                        dice_x = 280 - (len(self.dice_anim.final_values) * 58) // 2 + i * 58 + 24
+                        self._add_particles(dice_x, 584, PALETTE['gold'], 5)
 
                 # Show total after all dice settle
                 if all(self.dice_anim.die_settled) and not self.dice_anim.show_total:
                     self.dice_anim.show_total = True
                     # Add celebration particles for total
-                    self._add_particles(280, 310, PALETTE['gold'], 10)
+                    self._add_particles(280, 590, PALETTE['gold'], 10)
 
                 # Animate total scale
                 if self.dice_anim.show_total and self.dice_anim.total_scale < 1.0:
@@ -522,6 +571,28 @@ class GameUI:
 
             if self.dice_anim.timer >= self.dice_anim.duration:
                 self.dice_anim.active = False
+
+        # Update player movement animation
+        pm = self.player_movement
+        if pm.path and pm.path_index < len(pm.path) - 1:
+            # Move through path squares one by one
+            move_speed = 6.0  # Squares per second
+            pm.progress += dt * move_speed
+
+            # Hop effect - arc motion between squares
+            pm.hop_height = math.sin(pm.progress * math.pi) * 12
+
+            if pm.progress >= 1.0:
+                # Move to next square in path
+                pm.progress = 0.0
+                pm.path_index += 1
+                pm.current_pos = pm.path[pm.path_index]
+
+                # Add small dust particles when landing
+                board_x, board_y = 30, 30
+                x, y = self._get_square_position(pm.current_pos, board_x, board_y)
+                self._add_particles(x + self.SQUARE_SIZE // 2, y + self.SQUARE_SIZE // 2 + 10,
+                                  (150, 140, 120), 3)
 
         # Update particles
         for p in self.particle_effects[:]:
@@ -640,26 +711,30 @@ class GameUI:
                     pygame.draw.rect(self._stone_surface, (20, 18, 25), (tx, ty, 19, 19), 1)
         surface.blit(self._stone_surface, (inner_x, inner_y))
 
-        # Draw the chained dragon boss in center
-        self._draw_chained_boss(surface, board_x, board_y)
-
-        # Draw squares
+        # Draw squares FIRST (before dragon so dragon appears on top)
         squares = self.game.get_board_squares()
         player_pos = self.game.get_player_position()
 
         for square in squares:
             x, y = self._get_square_position(square.index, board_x, board_y)
+            # Don't draw player on tile - we'll draw it separately with animation
             tile = sprites.create_board_tile(
                 self.SQUARE_SIZE - 2,
                 square.square_type,
                 square.has_monster,
-                square.index == player_pos
+                False  # Never draw player on tile
             )
             surface.blit(tile, (x, y))
 
             # Square number
             num_text = self.font_tiny.render(str(square.index), True, (200, 200, 200))
             surface.blit(num_text, (x + 2, y + 2))
+
+        # Draw the chained dragon boss in center (AFTER squares)
+        self._draw_chained_boss(surface, board_x, board_y)
+
+        # Draw animated player token (AFTER dragon)
+        self._draw_player_token(surface, board_x, board_y, player_pos)
 
     def _draw_chained_boss(self, surface: pygame.Surface, board_x: int, board_y: int) -> None:
         """Draw the chained dragon boss in the board center."""
@@ -677,21 +752,31 @@ class GameUI:
         chains_remaining = total_chains - chains_broken
 
         # Dragon sprite size
-        dragon_size = 120
+        dragon_size = 130
 
-        # Get dragon sprite
-        dragon = sprites.create_monster_sprite("dragon", dragon_size, is_boss=True)
-
-        # Darken the dragon if still chained
-        if chains_remaining > 0:
-            dark_overlay = pygame.Surface((dragon_size, dragon_size), pygame.SRCALPHA)
-            dark_overlay.fill((0, 0, 0, 80))
-            dragon.blit(dark_overlay, (0, 0))
-
-        # Draw dragon
+        # Draw position - center of inner board area
         dragon_x = center_x - dragon_size // 2
         dragon_y = center_y - dragon_size // 2 - 10
-        surface.blit(dragon, (dragon_x, dragon_y))
+
+        # Get dragon sprite (no boss aura - this is decorative, not battle sprite)
+        dragon = sprites.create_monster_sprite("dragon", dragon_size, is_boss=False)
+
+        # Make a copy to modify
+        dragon_display = dragon.copy()
+
+        # Darken the dragon if still heavily chained
+        if chains_remaining > 4:
+            dark_overlay = pygame.Surface((dragon_size, dragon_size), pygame.SRCALPHA)
+            dark_overlay.fill((0, 0, 0, 80))
+            dragon_display.blit(dark_overlay, (0, 0))
+        elif chains_remaining > 0:
+            # Slightly darkened
+            dark_overlay = pygame.Surface((dragon_size, dragon_size), pygame.SRCALPHA)
+            dark_overlay.fill((0, 0, 0, 30))
+            dragon_display.blit(dark_overlay, (0, 0))
+
+        # Draw dragon
+        surface.blit(dragon_display, (dragon_x, dragon_y))
 
         # Draw chains around the dragon
         chain_color = (100, 90, 80)
@@ -761,6 +846,119 @@ class GameUI:
         else:
             return (bx, by + self.BOARD_SIZE - (index - 30) * self.SQUARE_SIZE - self.SQUARE_SIZE)
 
+    def _draw_player_token(self, surface: pygame.Surface, board_x: int, board_y: int, player_pos: int) -> None:
+        """Draw an animated, eye-catching player token with smooth movement."""
+        if player_pos is None:
+            return
+
+        # Get animated position from movement state
+        pm = self.player_movement
+        if pm.path and pm.path_index < len(pm.path):
+            current_square = pm.path[pm.path_index]
+            # Get position of current square
+            x1, y1 = self._get_square_position(current_square, board_x, board_y)
+
+            # If still moving, interpolate to next square
+            if pm.path_index < len(pm.path) - 1:
+                next_square = pm.path[pm.path_index + 1]
+                x2, y2 = self._get_square_position(next_square, board_x, board_y)
+                # Linear interpolation
+                x = x1 + (x2 - x1) * pm.progress
+                y = y1 + (y2 - y1) * pm.progress
+                # Apply hop height
+                hop_offset = -pm.hop_height
+            else:
+                x, y = x1, y1
+                hop_offset = 0
+        else:
+            # Fall back to actual position
+            x, y = self._get_square_position(player_pos, board_x, board_y)
+            hop_offset = 0
+
+        cx = x + self.SQUARE_SIZE // 2 - 1
+        cy = y + self.SQUARE_SIZE // 2 - 1 + hop_offset
+
+        # Get current time for animations
+        t = pygame.time.get_ticks()
+
+        # Pulsing glow effect
+        pulse = (math.sin(t / 200) + 1) / 2
+        glow_size = int(28 + 6 * pulse)
+
+        # Outer glow (cyan/gold gradient based on pulse)
+        glow_surf = pygame.Surface((glow_size * 2 + 10, glow_size * 2 + 10), pygame.SRCALPHA)
+        for i in range(4):
+            alpha = int((80 - i * 18) * (0.7 + 0.3 * pulse))
+            glow_color = (
+                int(100 + 155 * pulse),  # R: gold when pulsing
+                int(200 - 50 * pulse),    # G
+                int(255 - 155 * pulse),   # B: cyan base
+                alpha
+            )
+            pygame.draw.circle(glow_surf, glow_color,
+                             (glow_size + 5, glow_size + 5), glow_size - i * 3)
+        surface.blit(glow_surf, (int(cx - glow_size - 5), int(cy - glow_size - 5)))
+
+        # Bobbing animation (reduced when hopping)
+        is_moving = pm.path and pm.path_index < len(pm.path) - 1
+        bob = 0 if is_moving else math.sin(t / 300) * 3
+
+        # Character portrait
+        player = self.game.get_player_data()
+        char_id = player.character_id if player else "warrior"
+        portrait_size = 32
+
+        # Get character portrait
+        portrait = sprites.create_character_portrait(char_id, portrait_size)
+
+        # Draw portrait with slight bob
+        portrait_x = int(cx - portrait_size // 2)
+        portrait_y = int(cy - portrait_size // 2 + bob)
+
+        # Add shadow under portrait (stretched when high, smaller when close to ground)
+        shadow_scale = 1.0 - (abs(hop_offset) / 20.0) * 0.3
+        shadow_w = int((portrait_size + 4) * shadow_scale)
+        shadow_h = int(8 * shadow_scale)
+        shadow_surf = pygame.Surface((shadow_w, shadow_h), pygame.SRCALPHA)
+        shadow_alpha = int(60 * shadow_scale)
+        pygame.draw.ellipse(shadow_surf, (0, 0, 0, shadow_alpha), (0, 0, shadow_w, shadow_h))
+        # Shadow stays on ground (doesn't move with hop)
+        ground_y = y + self.SQUARE_SIZE // 2 + portrait_size // 2 + 2
+        surface.blit(shadow_surf, (int(cx - shadow_w // 2), int(ground_y)))
+
+        # Draw the portrait
+        surface.blit(portrait, (portrait_x, portrait_y))
+
+        # Sparkle effects around player (only when not moving)
+        if not is_moving:
+            sparkle_phase = (t // 100) % 8
+            sparkle_positions = [
+                (cx - 18, cy - 10), (cx + 18, cy - 5),
+                (cx - 15, cy + 12), (cx + 15, cy + 15),
+                (cx - 5, cy - 20), (cx + 8, cy - 18),
+                (cx - 20, cy + 3), (cx + 20, cy - 2),
+            ]
+            for i, (sx, sy) in enumerate(sparkle_positions):
+                if (i + sparkle_phase) % 4 == 0:
+                    sparkle_size = 2 + (i % 2)
+                    sparkle_alpha = int(150 + 100 * math.sin(t / 100 + i))
+                    sparkle_color = (255, 255, 200, sparkle_alpha)
+                    sparkle_surf = pygame.Surface((sparkle_size * 2, sparkle_size * 2), pygame.SRCALPHA)
+                    pygame.draw.circle(sparkle_surf, sparkle_color, (sparkle_size, sparkle_size), sparkle_size)
+                    surface.blit(sparkle_surf, (int(sx - sparkle_size), int(sy - sparkle_size + bob)))
+
+    def _parse_dice_formula(self, formula: str) -> List[str]:
+        """Parse a dice formula like '2d6' or '1d6+1d8' into list of die types."""
+        import re
+        die_types = []
+        # Match patterns like "2d6", "1d8", "3d4"
+        parts = re.findall(r'(\d*)d(\d+)', formula)
+        for count_str, sides in parts:
+            count = int(count_str) if count_str else 1
+            for _ in range(count):
+                die_types.append(f"d{sides}")
+        return die_types if die_types else ["d6", "d6"]
+
     def _draw_dice_result(self, surface: pygame.Surface) -> None:
         """Draw dice animation/result with enhanced visuals."""
         if not self.last_turn_result:
@@ -770,8 +968,13 @@ class GameUI:
         dice_size = 52
         gap = 6
         total_width = len(rolls) * dice_size + (len(rolls) - 1) * gap
-        start_x = 180 - total_width // 2
-        base_y = 280
+        start_x = 280 - total_width // 2
+        base_y = 560  # Below the board entirely
+
+        # Get die type from character's dice formula
+        player = self.game.get_player_data()
+        char = get_character(player.character_id) if player else None
+        die_types = self._parse_dice_formula(char.dice_formula if char else "2d6")
 
         # Draw dice tray background
         tray_padding = 15
@@ -794,6 +997,10 @@ class GameUI:
             x = start_x + i * (dice_size + gap)
             y = base_y
 
+            # Get the die type for this specific die
+            die_type = die_types[i] if i < len(die_types) else "d6"
+            die_max = int(die_type[1:]) if die_type.startswith("d") else 6
+
             # Get animation offset
             offset_x, offset_y = 0.0, 0.0
             is_settled = True
@@ -803,14 +1010,14 @@ class GameUI:
 
             # Determine display value
             if self.dice_anim.active and not is_settled:
-                display_val = random.randint(1, 6)
+                display_val = random.randint(1, die_max)
                 rolling = True
             else:
                 display_val = value
                 rolling = False
 
-            # Create dice sprite
-            dice = sprites.create_dice(dice_size, display_val, "d6", rolling=rolling)
+            # Create dice sprite with correct die type
+            dice = sprites.create_dice(dice_size, display_val, die_type, rolling=rolling)
 
             # Apply offset
             draw_x = int(x + offset_x)
@@ -1498,7 +1705,7 @@ class GameUI:
             (BattleSpeed.INSTANT, "Instant", "4"),
         ]
 
-        current_speed = self.battle_scene.speed
+        current_speed = self.battle_scene.speed_mode
         for i, (speed, label, key) in enumerate(speeds):
             btn_y = y + 95 + i * 38
             is_selected = current_speed == speed

@@ -52,6 +52,7 @@ class SquareType(Enum):
     MONSTER = auto()
     ITEM = auto()
     BLESSING = auto()        # Shrine that grants blessings
+    CURSE = auto()           # Bad luck - spawns monsters on random tiles
     CORNER_START = auto()    # Index 0
     CORNER_SHOP = auto()     # Index 10 - Merchant
     CORNER_REST = auto()     # Index 20 - Inn/heal

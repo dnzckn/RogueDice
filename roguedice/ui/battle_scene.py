@@ -268,8 +268,8 @@ class BattleScene:
         self.state.player_attack_anim = max(0, self.state.player_attack_anim - dt * 8)
         self.state.monster_attack_anim = max(0, self.state.monster_attack_anim - dt * 8)
 
-        # Smoothly animate HP bars
-        hp_speed = 100 * speed_mult
+        # Smoothly animate HP bars (slower so player can see HP drain to 0)
+        hp_speed = 50 * speed_mult  # Slower HP drain
         if self.state.displayed_player_hp != self.state.target_player_hp:
             diff = self.state.target_player_hp - self.state.displayed_player_hp
             self.state.displayed_player_hp += min(abs(diff), hp_speed * dt) * (1 if diff > 0 else -1)
@@ -630,7 +630,7 @@ class BattleScene:
         )
         return (self.state.current_action_index >= len(self.state.actions)
                 and hp_done
-                and self._completion_timer >= 0.6)  # Longer delay to see final state
+                and self._completion_timer >= 1.2)  # 1.2 seconds to see HP at 0
 
     def dismiss(self) -> None:
         """Dismiss the battle scene."""

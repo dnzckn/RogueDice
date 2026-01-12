@@ -17,6 +17,7 @@ class BoardFactory:
         "MONSTER": SquareType.MONSTER,
         "ITEM": SquareType.ITEM,
         "BLESSING": SquareType.BLESSING,
+        "CURSE": SquareType.CURSE,
         "CORNER_START": SquareType.CORNER_START,
         "CORNER_SHOP": SquareType.CORNER_SHOP,
         "CORNER_REST": SquareType.CORNER_REST,

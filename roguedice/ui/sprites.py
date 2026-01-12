@@ -261,15 +261,12 @@ class AssetLoader:
 
         for path in paths:
             if path.exists():
-                # Load and scale
-                target_size = int(size * (1.3 if is_boss else 1.0))
-                img = self.load_image(path, (target_size, target_size))
+                # Load and scale - just use requested size directly
+                img = self.load_image(path, (size - 8, size - 8))
                 if img:
-                    # Create surface with proper centering
+                    # Create surface and center the image
                     surf = pygame.Surface((size, size), pygame.SRCALPHA)
-                    offset_x = (size - target_size) // 2
-                    offset_y = (size - target_size) // 2
-                    surf.blit(img, (offset_x, offset_y))
+                    surf.blit(img, (4, 4))
 
                     # Add boss aura
                     if is_boss:
@@ -279,13 +276,10 @@ class AssetLoader:
             elif path.is_dir():
                 # Check for files in directory
                 for subfile in path.glob("*.png"):
-                    target_size = int(size * (1.3 if is_boss else 1.0))
-                    img = self.load_image(subfile, (target_size, target_size))
+                    img = self.load_image(subfile, (size - 8, size - 8))
                     if img:
                         surf = pygame.Surface((size, size), pygame.SRCALPHA)
-                        offset_x = (size - target_size) // 2
-                        offset_y = (size - target_size) // 2
-                        surf.blit(img, (offset_x, offset_y))
+                        surf.blit(img, (4, 4))
                         if is_boss:
                             self._add_boss_aura(surf, size)
                         return surf
@@ -406,6 +400,15 @@ class SpriteGenerator:
         if key not in self.cache:
             self.cache[key] = creator_func(*args)
         return self.cache[key]
+
+    def clear_cache(self, pattern: str = None):
+        """Clear sprite cache. If pattern provided, only clear matching keys."""
+        if pattern is None:
+            self.cache.clear()
+        else:
+            keys_to_remove = [k for k in self.cache if pattern in k]
+            for k in keys_to_remove:
+                del self.cache[k]
 
     # ========== DICE SPRITES ==========
 
@@ -786,6 +789,7 @@ class SpriteGenerator:
             SquareType.MONSTER: 'monster',
             SquareType.ITEM: 'item',
             SquareType.BLESSING: 'blessing',
+            SquareType.CURSE: 'curse',
             SquareType.CORNER_START: 'start',
             SquareType.CORNER_SHOP: 'shop',
             SquareType.CORNER_REST: 'rest',
@@ -803,66 +807,153 @@ class SpriteGenerator:
             surf.blit(floor_tile, (0, 0))
         else:
             # Fall back to procedural generation
+            # Color coding: Red=danger, Blue=loot, Green=safe, Purple=magic, Yellow=shop
             type_colors = {
-                SquareType.EMPTY: (PALETTE['grass'], PALETTE['grass_dark']),
-                SquareType.MONSTER: (PALETTE['red_dark'], (100, 30, 30)),
-                SquareType.ITEM: ((50, 80, 120), (30, 50, 80)),
-                SquareType.BLESSING: ((100, 60, 140), (70, 40, 100)),
-                SquareType.CORNER_START: (PALETTE['green'], PALETTE['green_dark']),
-                SquareType.CORNER_SHOP: (PALETTE['gold_dark'], (120, 90, 20)),
-                SquareType.CORNER_REST: (PALETTE['blue'], PALETTE['blue_dark']),
-                SquareType.CORNER_BOSS: ((160, 40, 40), (100, 20, 20)),
-                SquareType.SPECIAL: (PALETTE['purple'], PALETTE['purple_dark']),
+                SquareType.EMPTY: ((60, 70, 60), (45, 55, 45)),           # Gray-green (safe path)
+                SquareType.MONSTER: ((80, 40, 40), (60, 25, 25)),         # Dark red (danger zone)
+                SquareType.ITEM: ((40, 60, 90), (25, 40, 70)),            # Blue (loot)
+                SquareType.BLESSING: ((70, 50, 100), (50, 35, 80)),       # Purple (magic buff)
+                SquareType.CURSE: ((50, 30, 60), (35, 20, 45)),           # Dark purple (bad magic)
+                SquareType.CORNER_START: ((50, 80, 50), (35, 60, 35)),    # Green (safe start)
+                SquareType.CORNER_SHOP: ((100, 85, 40), (80, 65, 25)),    # Gold (shop)
+                SquareType.CORNER_REST: ((40, 70, 90), (25, 50, 70)),     # Blue (healing)
+                SquareType.CORNER_BOSS: ((100, 30, 30), (80, 20, 20)),    # Bright red (boss)
+                SquareType.SPECIAL: ((80, 60, 100), (60, 45, 80)),        # Purple (random)
             }
 
             main_color, dark_color = type_colors.get(square_type, (PALETTE['gray'], PALETTE['gray_dark']))
 
-            # Tile base
+            # Tile base with slight 3D effect
             pygame.draw.rect(surf, dark_color, (0, 0, size, size))
             pygame.draw.rect(surf, main_color, (2, 2, size - 4, size - 4))
+            # Highlight edge
+            pygame.draw.line(surf, tuple(min(255, c + 30) for c in main_color), (2, 2), (size - 3, 2), 1)
+            pygame.draw.line(surf, tuple(min(255, c + 30) for c in main_color), (2, 2), (2, size - 3), 1)
 
-            # Add texture pattern
-            for i in range(0, size, 8):
-                for j in range(0, size, 8):
-                    if (i + j) % 16 == 0:
-                        pygame.draw.rect(surf, dark_color, (i, j, 2, 2))
+        # Border - color coded for quick identification
+        border_colors = {
+            SquareType.MONSTER: (180, 60, 60),      # Red border
+            SquareType.ITEM: (80, 140, 200),        # Blue border
+            SquareType.BLESSING: (180, 140, 220),   # Light purple
+            SquareType.CURSE: (100, 50, 120),       # Dark purple
+            SquareType.CORNER_SHOP: (200, 170, 80), # Gold
+            SquareType.CORNER_REST: (100, 180, 220),# Cyan
+            SquareType.CORNER_BOSS: (220, 80, 80),  # Bright red
+        }
+        border_color = border_colors.get(square_type, PALETTE['black'])
+        pygame.draw.rect(surf, border_color, (0, 0, size, size), 2)
 
-        # Border
-        pygame.draw.rect(surf, PALETTE['black'], (0, 0, size, size), 1)
-
-        # Type indicator in center
+        # Type indicator icons - INTUITIVE VISUAL DESIGN
         cx, cy = size // 2, size // 2
-        if square_type == SquareType.MONSTER or has_monster:
-            # Skull icon
-            pygame.draw.circle(surf, (200, 200, 200), (cx, cy - 2), 8)
-            pygame.draw.circle(surf, PALETTE['black'], (cx - 3, cy - 3), 2)
-            pygame.draw.circle(surf, PALETTE['black'], (cx + 3, cy - 3), 2)
-            pygame.draw.rect(surf, (200, 200, 200), (cx - 4, cy + 3, 8, 4))
-        elif square_type == SquareType.ITEM:
-            # Chest icon
-            pygame.draw.rect(surf, (150, 100, 50), (cx - 7, cy - 4, 14, 10))
-            pygame.draw.rect(surf, (100, 70, 35), (cx - 7, cy - 4, 14, 10), 1)
-            pygame.draw.rect(surf, PALETTE['gold'], (cx - 2, cy, 4, 3))
-        elif square_type == SquareType.BLESSING:
-            # Star icon
-            self._draw_star(surf, cx, cy, 8, PALETTE['gold'])
-        elif square_type == SquareType.CORNER_SHOP:
-            # Coin icon
-            pygame.draw.circle(surf, PALETTE['gold'], (cx, cy), 10)
-            pygame.draw.circle(surf, PALETTE['gold_dark'], (cx, cy), 10, 2)
-            pygame.draw.circle(surf, PALETTE['gold_light'], (cx - 2, cy - 2), 3)
-        elif square_type == SquareType.CORNER_REST:
-            # Heart icon
-            self._draw_heart(surf, cx, cy, 10)
-        elif square_type == SquareType.CORNER_BOSS:
-            # Crown icon
-            self._draw_crown(surf, cx, cy - 2, 12)
 
-        # Player token
+        if square_type == SquareType.MONSTER:
+            if has_monster:
+                # ACTIVE MONSTER: Skull with red glow = DANGER, FIGHT HERE!
+                # Red warning glow
+                pygame.draw.circle(surf, (200, 50, 50, 100), (cx, cy), 14)
+                # Skull
+                pygame.draw.circle(surf, (240, 240, 230), (cx, cy - 2), 9)
+                pygame.draw.circle(surf, (30, 30, 30), (cx - 3, cy - 4), 2)  # Left eye
+                pygame.draw.circle(surf, (30, 30, 30), (cx + 3, cy - 4), 2)  # Right eye
+                pygame.draw.polygon(surf, (30, 30, 30), [(cx - 1, cy), (cx + 1, cy), (cx, cy + 2)])  # Nose
+                pygame.draw.rect(surf, (240, 240, 230), (cx - 5, cy + 4, 10, 5))  # Jaw
+                # Teeth marks
+                for i in range(-4, 5, 2):
+                    pygame.draw.line(surf, (30, 30, 30), (cx + i, cy + 4), (cx + i, cy + 8), 1)
+            else:
+                # EMPTY DANGER ZONE: Just crossed swords = potential danger, no monster now
+                # Draw crossed swords to show it's a battle zone
+                pygame.draw.line(surf, (120, 100, 90), (cx - 8, cy - 8), (cx + 8, cy + 8), 2)
+                pygame.draw.line(surf, (120, 100, 90), (cx + 8, cy - 8), (cx - 8, cy + 8), 2)
+                # Small "?" to indicate empty
+                font_surf = pygame.Surface((12, 14), pygame.SRCALPHA)
+                pygame.draw.circle(font_surf, (100, 80, 80), (6, 4), 4, 1)
+                pygame.draw.line(font_surf, (100, 80, 80), (6, 8), (6, 10), 1)
+                pygame.draw.circle(font_surf, (100, 80, 80), (6, 12), 1)
+                surf.blit(font_surf, (cx - 6, cy - 5))
+
+        elif square_type == SquareType.ITEM:
+            # TREASURE CHEST: Blue glow + chest = LOOT!
+            pygame.draw.circle(surf, (60, 100, 150, 80), (cx, cy), 12)
+            # Chest body
+            pygame.draw.rect(surf, (160, 110, 60), (cx - 8, cy - 4, 16, 11))
+            pygame.draw.rect(surf, (120, 80, 40), (cx - 8, cy - 4, 16, 11), 1)
+            # Chest lid
+            pygame.draw.rect(surf, (180, 130, 70), (cx - 9, cy - 7, 18, 4))
+            # Lock/clasp
+            pygame.draw.rect(surf, PALETTE['gold'], (cx - 2, cy, 4, 4))
+            pygame.draw.circle(surf, PALETTE['gold'], (cx, cy - 1), 2)
+
+        elif square_type == SquareType.BLESSING:
+            # SHRINE: Star with glow = BUFF!
+            pygame.draw.circle(surf, (140, 100, 180, 80), (cx, cy), 12)
+            self._draw_star(surf, cx, cy, 9, PALETTE['gold'])
+            # Small + sign to indicate buff
+            pygame.draw.line(surf, (200, 255, 200), (cx - 12, cy), (cx - 8, cy), 2)
+            pygame.draw.line(surf, (200, 255, 200), (cx - 10, cy - 2), (cx - 10, cy + 2), 2)
+
+        elif square_type == SquareType.CURSE:
+            # CURSE: Skull with purple aura = BAD STUFF HAPPENS!
+            pygame.draw.circle(surf, (80, 40, 100, 100), (cx, cy), 14)
+            # Cracked skull (evil)
+            pygame.draw.circle(surf, (140, 120, 160), (cx, cy - 1), 8)
+            pygame.draw.circle(surf, (60, 20, 80), (cx - 3, cy - 3), 2)  # Left eye
+            pygame.draw.circle(surf, (60, 20, 80), (cx + 3, cy - 3), 2)  # Right eye
+            # Crack line
+            pygame.draw.line(surf, (60, 20, 80), (cx, cy - 8), (cx + 2, cy + 2), 1)
+            # Warning symbol below
+            pygame.draw.polygon(surf, (180, 100, 180), [(cx, cy + 6), (cx - 4, cy + 12), (cx + 4, cy + 12)])
+            pygame.draw.line(surf, (60, 20, 80), (cx, cy + 7), (cx, cy + 10), 1)
+
+        elif square_type == SquareType.CORNER_SHOP:
+            # MERCHANT: Coin/gold sack = BUY STUFF!
+            pygame.draw.circle(surf, (180, 150, 60, 80), (cx, cy), 14)
+            # Gold coin
+            pygame.draw.circle(surf, PALETTE['gold'], (cx, cy), 11)
+            pygame.draw.circle(surf, PALETTE['gold_dark'], (cx, cy), 11, 2)
+            pygame.draw.circle(surf, PALETTE['gold_light'], (cx - 3, cy - 3), 4)
+            # $ symbol
+            pygame.draw.line(surf, PALETTE['gold_dark'], (cx, cy - 6), (cx, cy + 6), 2)
+            pygame.draw.arc(surf, PALETTE['gold_dark'], (cx - 4, cy - 5, 8, 6), 0.5, 2.5, 2)
+            pygame.draw.arc(surf, PALETTE['gold_dark'], (cx - 4, cy, 8, 6), 3.5, 5.8, 2)
+
+        elif square_type == SquareType.CORNER_REST:
+            # INN: Heart = HEAL!
+            pygame.draw.circle(surf, (100, 180, 220, 80), (cx, cy), 14)
+            self._draw_heart(surf, cx, cy, 11)
+            # + symbol to indicate healing
+            pygame.draw.line(surf, (255, 255, 255), (cx - 3, cy), (cx + 3, cy), 2)
+            pygame.draw.line(surf, (255, 255, 255), (cx, cy - 3), (cx, cy + 3), 2)
+
+        elif square_type == SquareType.CORNER_BOSS:
+            # BOSS ARENA: Crown with fire = BIG FIGHT!
+            pygame.draw.circle(surf, (200, 60, 60, 100), (cx, cy), 14)
+            self._draw_crown(surf, cx, cy - 2, 13)
+            # Fire particles below crown
+            for i in range(-4, 5, 3):
+                pygame.draw.polygon(surf, (255, 150, 50), [
+                    (cx + i, cy + 8), (cx + i - 2, cy + 14), (cx + i + 2, cy + 14)
+                ])
+
+        elif square_type == SquareType.CORNER_START:
+            # START: Flag = BEGIN HERE!
+            # Flag pole
+            pygame.draw.line(surf, (100, 80, 60), (cx - 6, cy - 10), (cx - 6, cy + 10), 2)
+            # Flag
+            pygame.draw.polygon(surf, (80, 180, 80), [(cx - 5, cy - 10), (cx + 8, cy - 5), (cx - 5, cy)])
+
+        elif square_type == SquareType.SPECIAL:
+            # SPECIAL: Question mark = RANDOM EVENT!
+            pygame.draw.circle(surf, (130, 100, 160, 80), (cx, cy), 12)
+            # Big ?
+            pygame.draw.circle(surf, (220, 200, 240), (cx, cy - 4), 6, 2)
+            pygame.draw.line(surf, (220, 200, 240), (cx + 3, cy - 2), (cx, cy + 3), 2)
+            pygame.draw.circle(surf, (220, 200, 240), (cx, cy + 7), 2)
+
+        # Player token (not used since player is drawn separately now)
         if has_player:
-            pygame.draw.circle(surf, PALETTE['blue'], (cx, cy), 12)
-            pygame.draw.circle(surf, PALETTE['blue_light'], (cx, cy), 12, 2)
-            pygame.draw.circle(surf, (255, 255, 255), (cx - 3, cy - 3), 4)
+            pygame.draw.circle(surf, PALETTE['cyan'], (cx, cy), 12)
+            pygame.draw.circle(surf, PALETTE['white'], (cx, cy), 12, 2)
 
         return surf
 
@@ -1263,60 +1354,73 @@ class SpriteGenerator:
         pygame.draw.circle(surf, PALETTE['red'], (cx + 5, cy - 17), 3)
 
     def _draw_dragon_monster(self, surf, cx, cy, size, color, dark, light, scale, is_boss):
-        """Draw a dragon monster."""
-        s = 1.5 if is_boss else 1.0
+        """Draw a dragon monster - properly scaled to fit within size."""
+        # Scale factor based on size (designed for 96px base)
+        sf = size / 96.0
+        s = (1.3 if is_boss else 1.0) * sf
+
+        # Offset to center the dragon properly (dragon design is off-center)
+        ox = int(10 * sf)  # Shift right to center
+        oy = int(5 * sf)   # Shift down slightly
 
         # Body
         body_w = int(50 * s)
         body_h = int(35 * s)
-        pygame.draw.ellipse(surf, color, (cx - body_w // 2, cy - 5, body_w, body_h))
+        pygame.draw.ellipse(surf, color, (cx - body_w // 2 + ox, cy - int(5 * sf) + oy, body_w, body_h))
 
         # Neck and head
-        pygame.draw.ellipse(surf, color, (cx - 30, cy - 35, 25, 40))
-        pygame.draw.circle(surf, color, (cx - 35, cy - 40), int(15 * s))
+        pygame.draw.ellipse(surf, color, (cx - int(30 * sf) + ox, cy - int(30 * sf) + oy, int(25 * sf), int(35 * sf)))
+        pygame.draw.circle(surf, color, (cx - int(32 * sf) + ox, cy - int(32 * sf) + oy), int(14 * s))
 
         # Snout
-        pygame.draw.ellipse(surf, light, (cx - 55, cy - 45, 25, 12))
+        pygame.draw.ellipse(surf, light, (cx - int(48 * sf) + ox, cy - int(38 * sf) + oy, int(22 * sf), int(10 * sf)))
 
         # Eye
-        pygame.draw.circle(surf, PALETTE['gold'], (cx - 40, cy - 45), 5)
-        pygame.draw.circle(surf, PALETTE['black'], (cx - 40, cy - 45), 2)
+        pygame.draw.circle(surf, PALETTE['gold'], (cx - int(36 * sf) + ox, cy - int(36 * sf) + oy), int(4 * sf))
+        pygame.draw.circle(surf, PALETTE['black'], (cx - int(36 * sf) + ox, cy - int(36 * sf) + oy), int(2 * sf))
 
         # Horns
         pygame.draw.polygon(surf, dark, [
-            (cx - 30, cy - 50), (cx - 35, cy - 70), (cx - 25, cy - 50)
+            (cx - int(28 * sf) + ox, cy - int(42 * sf) + oy),
+            (cx - int(32 * sf) + ox, cy - int(55 * sf) + oy),
+            (cx - int(23 * sf) + ox, cy - int(42 * sf) + oy)
         ])
         pygame.draw.polygon(surf, dark, [
-            (cx - 20, cy - 45), (cx - 18, cy - 60), (cx - 12, cy - 45)
+            (cx - int(18 * sf) + ox, cy - int(38 * sf) + oy),
+            (cx - int(16 * sf) + ox, cy - int(48 * sf) + oy),
+            (cx - int(10 * sf) + ox, cy - int(38 * sf) + oy)
         ])
 
         # Wings
-        wing_h = int(50 * s)
+        wing_h = int(40 * s)
         pygame.draw.polygon(surf, dark, [
-            (cx - 10, cy - 10),
-            (cx + 30, cy - wing_h),
-            (cx + 50, cy - wing_h + 20),
-            (cx + 40, cy),
-            (cx + 10, cy + 10),
+            (cx - int(8 * sf) + ox, cy - int(8 * sf) + oy),
+            (cx + int(25 * sf) + ox, cy - wing_h + oy),
+            (cx + int(40 * sf) + ox, cy - wing_h + int(18 * sf) + oy),
+            (cx + int(32 * sf) + ox, cy + oy),
+            (cx + int(8 * sf) + ox, cy + int(8 * sf) + oy),
         ])
 
         # Tail
-        pygame.draw.arc(surf, color, (cx + 10, cy, 40, 30), -1, 1, 6)
+        tail_rect = (cx + int(8 * sf) + ox, cy + oy, int(35 * sf), int(25 * sf))
+        pygame.draw.arc(surf, color, tail_rect, -1, 1, max(3, int(5 * sf)))
 
         # Spikes on back
-        for i in range(5):
-            sx = cx - 15 + i * 12
+        for i in range(4):
+            sx = cx - int(12 * sf) + ox + i * int(10 * sf)
             pygame.draw.polygon(surf, dark, [
-                (sx, cy - 10), (sx + 5, cy - 25), (sx + 10, cy - 10)
+                (sx, cy - int(8 * sf) + oy),
+                (sx + int(4 * sf), cy - int(20 * sf) + oy),
+                (sx + int(8 * sf), cy - int(8 * sf) + oy)
             ])
 
         # Fire breath for boss
         if is_boss:
-            for i in range(8):
-                fx = cx - 60 - i * 5
-                fy = cy - 40 + random.randint(-5, 5) if 'random' in dir() else cy - 40
-                pygame.draw.circle(surf, PALETTE['orange'], (fx, fy), 6 - i // 2)
-            pygame.draw.circle(surf, PALETTE['gold'], (cx - 60, cy - 40), 8)
+            for i in range(6):
+                fx = cx - int(52 * sf) + ox - i * int(4 * sf)
+                fy = cy - int(35 * sf) + oy + random.randint(-3, 3)
+                pygame.draw.circle(surf, PALETTE['orange'], (fx, fy), max(2, int((5 - i // 2) * sf)))
+            pygame.draw.circle(surf, PALETTE['gold'], (cx - int(52 * sf) + ox, cy - int(35 * sf) + oy), int(6 * sf))
 
     # ========== BATTLE CHARACTER SPRITES ==========
 

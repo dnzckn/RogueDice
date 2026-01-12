@@ -1,7 +1,7 @@
 """Board square component for square properties."""
 
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Optional, List
 from ..core.component import Component
 from ..models.enums import SquareType
 
@@ -14,9 +14,8 @@ class BoardSquareComponent(Component):
     square_type: SquareType = SquareType.EMPTY
     name: str = ""
 
-    # For monster squares
-    has_monster: bool = False
-    monster_entity_id: Optional[int] = None
+    # For monster squares - supports multiple monsters (1vX combat)
+    monster_entity_ids: List[int] = field(default_factory=list)
 
     # For item squares
     item_tier: int = 1
@@ -24,17 +23,44 @@ class BoardSquareComponent(Component):
     # Visual
     sprite_name: str = "grass"
 
-    def place_monster(self, monster_id: int) -> None:
-        """Place a monster on this square."""
-        self.has_monster = True
-        self.monster_entity_id = monster_id
+    @property
+    def has_monster(self) -> bool:
+        """Check if square has any monsters."""
+        return len(self.monster_entity_ids) > 0
 
-    def clear_monster(self) -> Optional[int]:
-        """Remove monster from square, return its ID."""
-        monster_id = self.monster_entity_id
-        self.has_monster = False
-        self.monster_entity_id = None
-        return monster_id
+    @property
+    def monster_entity_id(self) -> Optional[int]:
+        """Get first monster ID (backwards compatibility)."""
+        return self.monster_entity_ids[0] if self.monster_entity_ids else None
+
+    @property
+    def monster_count(self) -> int:
+        """Get number of monsters on this square."""
+        return len(self.monster_entity_ids)
+
+    def place_monster(self, monster_id: int) -> None:
+        """Add a monster to this square."""
+        if monster_id not in self.monster_entity_ids:
+            self.monster_entity_ids.append(monster_id)
+
+    def clear_monster(self, monster_id: Optional[int] = None) -> Optional[int]:
+        """Remove a monster from square. If no ID given, removes first monster."""
+        if not self.monster_entity_ids:
+            return None
+
+        if monster_id is None:
+            # Remove first monster
+            return self.monster_entity_ids.pop(0)
+        elif monster_id in self.monster_entity_ids:
+            self.monster_entity_ids.remove(monster_id)
+            return monster_id
+        return None
+
+    def clear_all_monsters(self) -> List[int]:
+        """Remove all monsters from square, return their IDs."""
+        monster_ids = self.monster_entity_ids.copy()
+        self.monster_entity_ids.clear()
+        return monster_ids
 
     @property
     def is_corner(self) -> bool:

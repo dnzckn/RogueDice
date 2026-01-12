@@ -391,6 +391,37 @@ class GameService:
             self._generate_merchant_inventory(player.current_round)
             result.opened_merchant = True
 
+        elif square.square_type == SquareType.CURSE:
+            # CURSE: Spawn monsters on random empty monster squares!
+            result.monsters_spawned = self._trigger_curse(player.current_round)
+
+    def _trigger_curse(self, current_round: int) -> List[int]:
+        """Trigger curse effect - spawn 2-4 monsters on random empty squares."""
+        import random
+        spawned_squares = []
+
+        # Get all empty monster squares
+        empty_monster_squares = []
+        for entity_id, square in self.world.query(BoardSquareComponent):
+            if (square.square_type == SquareType.MONSTER and
+                not square.has_monster):
+                empty_monster_squares.append((entity_id, square))
+
+        if not empty_monster_squares:
+            return []
+
+        # Spawn 2-4 monsters (more at higher rounds)
+        num_to_spawn = min(len(empty_monster_squares), random.randint(2, 4))
+
+        squares_to_spawn = random.sample(empty_monster_squares, num_to_spawn)
+
+        for square_entity_id, square in squares_to_spawn:
+            monster_id = self.monster_factory.create_monster(current_round)
+            square.place_monster(monster_id)
+            spawned_squares.append(square.index)
+
+        return spawned_squares
+
     def _apply_blessing_combat_bonuses(
         self, player: PlayerComponent, stats: StatsComponent
     ) -> None:
