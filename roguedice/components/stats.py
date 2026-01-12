@@ -18,7 +18,7 @@ class StatsComponent(Component):
     crit_chance: float = 0.05       # 0.0 to 1.0
     crit_multiplier: float = 2.0
     true_damage: float = 0.0        # Ignores defense
-    area_damage: float = 0.0        # Splash damage
+    cleave: float = 0.0             # AOE: % of damage dealt to ALL enemies (0.0 = single target, 1.0 = full damage to all)
     life_steal: float = 0.0         # 0.0 to 1.0, % of damage healed
 
     # Defense
