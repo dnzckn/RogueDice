@@ -66,7 +66,7 @@ class GameService:
     Main game service that orchestrates all game logic.
     """
 
-    BOSS_SPAWN_ROUND = 21  # Boss spawns after round 20
+    BOSS_SPAWN_ROUND = 15  # Boss spawns after round 14
 
     def __init__(self):
         self.world = World()
@@ -225,7 +225,7 @@ class GameService:
             if square:
                 self._process_square(square, result, player, player_stats)
 
-            # Force boss fight at round 21+ if boss is active and not yet fought
+            # Force boss fight at round 15+ if boss is active and not yet fought
             if (player.current_round >= self.BOSS_SPAWN_ROUND and
                 self.boss_active and
                 not player.boss_defeated and
@@ -273,7 +273,7 @@ class GameService:
         if square:
             self._process_square(square, result, player, player_stats)
 
-        # Force boss fight at round 21+ if boss is active and not yet fought
+        # Force boss fight at round 15+ if boss is active and not yet fought
         if (player.current_round >= self.BOSS_SPAWN_ROUND and
             self.boss_active and
             not player.boss_defeated and

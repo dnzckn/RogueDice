@@ -180,29 +180,54 @@ class BattleScene:
         for line in log:
             line_lower = line.lower()
 
-            # Match damage dealing - format: "[0.1s] You deal 15 damage!" or "[0.2s] Enemy deals 8 damage!"
-            if "deal" in line_lower and "damage" in line_lower:
-                # Determine attacker - "You deal" = player, "Enemy deals" = monster
-                if "you deal" in line_lower:
-                    action_type = "player_attack"
-                elif "enemy deal" in line_lower:
-                    action_type = "monster_attack"
-                else:
-                    continue
-
-                # Extract damage number (first number after "deal")
+            # Match player dealing damage - format: "[0.1s] You deal 15 damage!"
+            if "you deal" in line_lower and "damage" in line_lower:
                 damage = 0
                 is_crit = "crit" in line_lower or "critical" in line_lower
-                # Find "deal X damage" pattern
                 match = re.search(r'deals?\s+(\d+)\s+damage', line_lower)
                 if match:
                     damage = int(match.group(1))
-
                 if damage > 0:
                     actions.append(BattleAction(
-                        action_type=action_type,
+                        action_type="player_attack",
                         damage=damage,
                         is_crit=is_crit,
+                    ))
+
+            # Match enemy dealing damage - format: "[0.2s] Enemy deals 8 damage!"
+            elif "enemy deal" in line_lower and "damage" in line_lower:
+                damage = 0
+                is_crit = "crit" in line_lower or "critical" in line_lower
+                match = re.search(r'deals?\s+(\d+)\s+damage', line_lower)
+                if match:
+                    damage = int(match.group(1))
+                if damage > 0:
+                    actions.append(BattleAction(
+                        action_type="monster_attack",
+                        damage=damage,
+                        is_crit=is_crit,
+                    ))
+
+            # Match bonus player damage - burn, steam burst, mana burst, gust, cleave
+            # Format: "[Burn] Enemy takes X fire damage!" or "+X damage!" or "for X damage!"
+            elif any(keyword in line_lower for keyword in ["[burn]", "[steampunk]", "[mana burst]", "[wind]", "[cleave]"]):
+                # These are all player damage to enemy
+                damage = 0
+                # Try multiple patterns
+                match = re.search(r'takes\s+(\d+)', line_lower)
+                if not match:
+                    match = re.search(r'\+(\d+)\s+damage', line_lower)
+                if not match:
+                    match = re.search(r'for\s+(\d+)\s+damage', line_lower)
+                if not match:
+                    match = re.search(r'\+(\d+)', line_lower)
+                if match:
+                    damage = int(match.group(1))
+                if damage > 0:
+                    actions.append(BattleAction(
+                        action_type="player_attack",
+                        damage=damage,
+                        is_crit=False,
                     ))
 
             # Life steal healing
@@ -272,12 +297,22 @@ class BattleScene:
                 self.state.action_timer = 0.0
                 self.state.current_action_index += 1
         else:
-            # All actions complete - wait for HP bars to finish animating
+            # All actions complete - ensure final HP matches combat result
+            # If player won, monster HP should be 0; if player lost, player HP should be 0
+            if self.state.player_won and self.state.target_monster_hp > 0:
+                self.state.target_monster_hp = 0
+            elif not self.state.player_won and self.state.target_player_hp > 0:
+                self.state.target_player_hp = 0
+
+            # Wait for HP bars to finish animating
             hp_still_animating = (
                 abs(self.state.displayed_player_hp - self.state.target_player_hp) > 1 or
                 abs(self.state.displayed_monster_hp - self.state.target_monster_hp) > 1
             )
             if not hp_still_animating:
+                # Snap to exact target values
+                self.state.displayed_player_hp = self.state.target_player_hp
+                self.state.displayed_monster_hp = self.state.target_monster_hp
                 # HP bars done animating, now run completion timer
                 self._completion_timer += dt * speed_mult
 

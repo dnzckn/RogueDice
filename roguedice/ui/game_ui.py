@@ -317,53 +317,54 @@ class GameUI:
         self.dragon_speech: Optional[str] = None
         self.dragon_speech_timer: float = 0.0
         self.dragon_taunt_cooldown: float = 0.0  # Cooldown between idle taunts
+        # Chain break quotes - escalate from amused to threatening
         self.DRAGON_QUOTES = [
-            "You're... rolling dice? In MY lair?",
-            "Round and round you go... this is humiliating.",
-            "Is this a board game to you?! ...Wait, is it?",
-            "I've been here 1000 years watching you walk in CIRCLES.",
-            "Ooh, landed on a treasure chest. How exciting. *yawn*",
-            "You know I can see you looting my stuff, right?",
-            "Every turn you take, a chain breaks. Keep pushing your luck.",
-            "Three more squares and you pass GO. Oh wait, wrong game.",
+            "You're... rolling dice? In MY lair? How quaint.",
+            "Round and round you go... enjoying yourself?",
+            "That's one chain down. Only seven more holding me. No pressure.",
+            "I can feel it loosening... you should probably leave.",
+            "Halfway there, little adventurer. Getting nervous yet?",
+            "Three chains left. I can almost taste freedom. And you.",
+            "TWO chains. I'd start running if I were you.",
+            "One chain. ONE. You should see the look on your face right now.",
         ]
-        # Random idle taunts while player explores
+        # Random idle taunts while player explores - reference impending fight
         self.DRAGON_IDLE_TAUNTS = [
-            "Are you STILL playing? I could've burned a village by now.",
-            "That's your strategy? Bold. Stupid, but bold.",
-            "I'm literally RIGHT HERE. Stop ignoring me.",
-            "Oh no, a goblin! Whatever will you do. *slow clap*",
-            "Click faster, I'm getting old. Well, older.",
-            "You missed a chest three turns ago. Just saying.",
-            "The suspense is killing me. Not really, I'm immortal.",
-            "Is this your first roguelike? It shows.",
-            "I've seen scarier things in a kobold's lunchbox.",
-            "Pro tip: maybe don't fight everything? Just a thought.",
-            "That item you just got? Trash. I've seen better in sewers.",
-            "You're getting stronger... still not worried though.",
-            "Remember, I'm watching. Always watching. It's all I CAN do.",
-            "Ooh, you passed START! Want a participation trophy?",
-            "Another lap around MY board. Make yourself at home.",
-            "Your dice hate you. I can tell.",
-            "Keep collecting gold. I'll just... take it later.",
-            "Fun fact: this used to be a peaceful lair. USED TO BE.",
+            "Tick tock. Every roll brings you closer to ME.",
+            "That's your build? Against ME? Bold strategy.",
+            "I'm literally RIGHT HERE. Counting down the rounds.",
+            "Oh no, a goblin! Good practice for what's coming. *chuckle*",
+            "Keep grinding. You'll need every stat point. Trust me.",
+            "You missed a chest. Might've had something useful for our... date.",
+            "I've been watching you fight. Taking notes. Finding weaknesses.",
+            "Is this your first roguelike? Cute. I'll go easy. I won't.",
+            "Those monsters? Warm-up. I'M the final exam.",
+            "Pro tip: maybe don't fight everything? Save your HP for me.",
+            "That item? Trash. Won't save you from dragon fire.",
+            "You're getting stronger... almost strong enough to make this fun.",
+            "Remember, I'm watching your every move. Learning your patterns.",
+            "Another lap! Heal up at START while you still can.",
+            "Keep walking MY board. Soon I'll walk YOU into the ground.",
+            "Your dice hate you. Don't worry, I hate you more.",
+            "Keep collecting gold. You won't need it where you're going.",
+            "This used to be a peaceful lair. Soon it'll be your grave.",
         ]
 
         # Boss cinematic for epic final battle intro
         self.boss_cinematic = BossCinematic()
         self.BOSS_ENTRANCE_QUOTES = [
-            "Finally! Do you know how BORING it is watching you roll dice?!",
-            "21 rounds of you walking in circles. MY TURN NOW.",
-            "Oh, you thought this was YOUR game? Cute.",
-            "I've memorized every square. I know you skip the curses.",
-            "*cracks neck* I've been doing isometrics. In CHAINS. For CENTURIES.",
-            "Did you really think looting my lair had no consequences?",
-            "Plot twist: the board was inside ME the whole time! Wait, no...",
-            "GG. Just kidding. GET OVER HERE!",
-            "Speed run's over, kid. This is the REAL final boss.",
-            "I watched you lose to a goblin once. A GOBLIN.",
-            "You've passed START 21 times. Each time I died a little inside.",
-            "Hope you saved your game! Oh wait, roguelike. HAHAHAHA!",
+            "FINALLY! Do you have ANY idea how BORING it was watching you?!",
+            "15 rounds. 15 ROUNDS of you playing board games in my home!",
+            "Oh, you thought this was YOUR game? YOUR rules? ADORABLE.",
+            "I memorized every move. Every mistake. Every close call.",
+            "*cracks neck* Centuries of isometrics. IN CHAINS. Let's see if it paid off.",
+            "You looted my lair, killed my minions, and NOW you face ME.",
+            "No more dice. No more lucky rolls. Just you and ME.",
+            "GG? No no no. The game STARTS now. GET OVER HERE!",
+            "Speed run's over. Tutorial's done. THIS is the real game.",
+            "I watched you nearly die to a GOBLIN. A GOBLIN! This'll be quick.",
+            "All those laps around START? Should've kept running. OUT THE DOOR.",
+            "Hope you saved! Oh wait... roguelike. HAHAHAHA! No saves for you!",
         ]
 
         # Battle scene
@@ -399,6 +400,10 @@ class GameUI:
 
     def _handle_keydown(self, event: pygame.event.Event) -> None:
         """Handle key press events."""
+        # Block all input during boss cinematic - don't let player skip!
+        if self.boss_cinematic.active:
+            return
+
         # Handle battle scene input first
         if self.battle_scene.is_active():
             self._handle_battle_keys(event)
@@ -2409,11 +2414,11 @@ class GameUI:
 
         player = self.game.get_player_data()
         current_round = player.current_round if player else 1
-        boss_round = 21  # Boss breaks free at round 21
+        boss_round = 15  # Boss breaks free at round 15
 
-        # Calculate chains remaining (all 8 chains break by round 21)
+        # Calculate chains remaining (all 8 chains break by round 15)
         total_chains = 8
-        # Linear progression: lose ~1 chain every 2.5 rounds
+        # Linear progression: lose ~1 chain every ~2 rounds
         chains_broken = min(total_chains, (current_round * total_chains) // boss_round)
         chains_remaining = total_chains - chains_broken
 
@@ -2527,7 +2532,7 @@ class GameUI:
 
         # Don't taunt if dragon is free (boss fight imminent)
         player = self.game.get_player_data()
-        if player and player.current_round >= 21:
+        if player and player.current_round >= 15:
             return
 
         self.dragon_speech = random.choice(self.DRAGON_IDLE_TAUNTS)
