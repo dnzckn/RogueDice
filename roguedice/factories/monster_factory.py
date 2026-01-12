@@ -49,22 +49,28 @@ class MonsterFactory:
             tier = 1 + (current_round - 1) // 5  # Tier increases every 5 rounds
             tier = min(tier, 5)
 
-        # Get appropriate templates
-        appropriate_templates = [
-            t for t in self.templates
-            if t.get("tier", 1) <= tier and not t.get("is_boss", False)
-        ]
-
-        if not appropriate_templates:
-            appropriate_templates = self.templates or [self._default_template()]
-
-        # Pick template with weighted tier selection (lower tiers more common)
+        # If specific template requested, find it FIRST (including bosses)
         if template_id:
-            template = next(
-                (t for t in self.templates if t.get("id") == template_id),
-                random.choice(appropriate_templates)
-            )
+            template = None
+            for t in self.templates:
+                if t.get("id") == template_id:
+                    template = t
+                    break
+
+            # If specific template not found, use default
+            if template is None:
+                print(f"WARNING: Template '{template_id}' not found, using default")
+                template = self._default_template()
         else:
+            # Get appropriate templates (excluding bosses for random selection)
+            appropriate_templates = [
+                t for t in self.templates
+                if t.get("tier", 1) <= tier and not t.get("is_boss", False)
+            ]
+
+            if not appropriate_templates:
+                appropriate_templates = [self._default_template()]
+
             # Weight templates: higher tier = lower weight
             # Tier 1 at max_tier 3: weight 3, Tier 2: weight 2, Tier 3: weight 1
             weights = []
