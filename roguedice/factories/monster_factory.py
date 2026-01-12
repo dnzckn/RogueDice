@@ -52,20 +52,28 @@ class MonsterFactory:
         # Get appropriate templates
         appropriate_templates = [
             t for t in self.templates
-            if t.get("tier", 1) <= tier
+            if t.get("tier", 1) <= tier and not t.get("is_boss", False)
         ]
 
         if not appropriate_templates:
             appropriate_templates = self.templates or [self._default_template()]
 
-        # Pick template
+        # Pick template with weighted tier selection (lower tiers more common)
         if template_id:
             template = next(
                 (t for t in self.templates if t.get("id") == template_id),
                 random.choice(appropriate_templates)
             )
         else:
-            template = random.choice(appropriate_templates)
+            # Weight templates: higher tier = lower weight
+            # Tier 1 at max_tier 3: weight 3, Tier 2: weight 2, Tier 3: weight 1
+            weights = []
+            for t in appropriate_templates:
+                t_tier = t.get("tier", 1)
+                weight = max(1, tier - t_tier + 1)  # Higher difference = higher weight
+                weights.append(weight)
+
+            template = random.choices(appropriate_templates, weights=weights, k=1)[0]
 
         # Create entity
         entity_id = self.world.create_entity()
@@ -88,7 +96,7 @@ class MonsterFactory:
             current_hp=final_hp,
             base_damage=final_damage,
             attack_speed=template.get("attack_speed", 1.0),
-            defense=template.get("defense", 0) + current_round,
+            defense=min(15, template.get("defense", 0) + current_round),
             crit_chance=template.get("crit_chance", 0.05),
             life_steal=template.get("life_steal", 0),
             true_damage=template.get("true_damage", 0),

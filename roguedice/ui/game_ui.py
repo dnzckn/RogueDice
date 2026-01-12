@@ -2158,6 +2158,11 @@ class GameUI:
                 self.pending_turn_result = updated_result
                 self.square_processing_pending = False
 
+                # Check if combat was triggered - start battle scene!
+                if updated_result.combat_result:
+                    self._start_battle(updated_result)
+                    return  # Don't process other results until battle is done
+
             result = self.pending_turn_result
             self.pending_turn_result = None
             self._process_turn_result(result)

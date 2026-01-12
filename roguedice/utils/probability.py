@@ -7,14 +7,15 @@ from ..models.enums import Rarity
 T = TypeVar('T')
 
 
-# Rarity weights (exponentially decreasing)
+# Rarity weights (balanced for progression)
+# Common ~45%, Uncommon ~28%, Rare ~18%, Epic ~6%, Legendary ~2.5%, Mythical ~0.5%
 RARITY_WEIGHTS: Dict[Rarity, int] = {
-    Rarity.COMMON: 1000,
-    Rarity.UNCOMMON: 400,
-    Rarity.RARE: 150,
-    Rarity.EPIC: 50,
-    Rarity.LEGENDARY: 15,
-    Rarity.MYTHICAL: 3,
+    Rarity.COMMON: 450,
+    Rarity.UNCOMMON: 280,
+    Rarity.RARE: 180,
+    Rarity.EPIC: 60,
+    Rarity.LEGENDARY: 25,
+    Rarity.MYTHICAL: 5,
 }
 
 
