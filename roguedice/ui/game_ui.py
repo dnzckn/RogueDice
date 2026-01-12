@@ -343,6 +343,7 @@ class GameUI:
         # Battle scene
         self.battle_scene = BattleScene(self.WINDOW_WIDTH, self.WINDOW_HEIGHT)
         self.pending_turn_result: Optional[TurnResult] = None
+        self.square_processing_pending: bool = False  # Defer square changes until after animation
 
         # Cached surfaces
         self._bg_surface = None
@@ -629,14 +630,30 @@ class GameUI:
         game.shots_taken += 1
 
     def _generate_minigame_reward(self, minigame) -> None:
-        """Generate item reward for winning a minigame."""
+        """Generate item reward for winning a minigame with rarity rolling."""
+        import random
         from ..models.enums import Rarity
         player = self.game.get_player_data()
         round_num = player.current_round if player else 1
-        # Use item_factory directly to force rare rarity
+
+        # Roll for rarity - base is Rare, but can roll higher!
+        # 60% Rare, 30% Epic, 10% Legendary
+        roll = random.random()
+        if roll < 0.10:  # 10% Legendary
+            rarity = Rarity.LEGENDARY
+            tier_bonus = 8
+            self._add_floating_text("LEGENDARY!", self.WINDOW_WIDTH // 2, 150, (255, 215, 0), 2.0)
+        elif roll < 0.40:  # 30% Epic
+            rarity = Rarity.EPIC
+            tier_bonus = 5
+            self._add_floating_text("Epic Drop!", self.WINDOW_WIDTH // 2, 150, (200, 100, 255), 1.5)
+        else:  # 60% Rare
+            rarity = Rarity.RARE
+            tier_bonus = 3
+
         minigame.reward_item_id = self.game.item_factory.create_item(
-            round_num + 3,  # Slightly better tier
-            rarity=Rarity.RARE
+            round_num + tier_bonus,
+            rarity=rarity
         )
 
     def _generate_roulette_reward(self, minigame) -> None:
@@ -756,18 +773,37 @@ class GameUI:
         player_stats = self.game.get_player_stats()
 
         if won:
-            # Player survived! 10% heal and small chance for item
+            # Player survived! 10% heal and chance for item
             heal_amount = int(player_stats.max_hp * 0.10)
             actual_heal = player_stats.heal(heal_amount)
             if actual_heal > 0:
                 self.message_log.append(f"Survived the {game.monster_name}! Healed {actual_heal} HP!")
                 self._add_floating_text(f"+{actual_heal} HP", self.WINDOW_WIDTH - 200, 280, PALETTE['green'], 1.5)
 
-            # 15% chance for a random item reward
-            if random.random() < 0.15:
+            # 25% chance for item reward with rarity rolling
+            if random.random() < 0.25:
                 player = self.game.get_player_data()
                 round_num = player.current_round if player else 1
-                item_id = self.game.item_factory.create_item(round_num, rarity=Rarity.UNCOMMON)
+
+                # Roll for rarity - 50% Uncommon, 35% Rare, 12% Epic, 3% Legendary
+                rarity_roll = random.random()
+                if rarity_roll < 0.03:  # 3% Legendary
+                    rarity = Rarity.LEGENDARY
+                    tier_bonus = 8
+                    self._add_floating_text("LEGENDARY DROP!", self.WINDOW_WIDTH - 200, 240, (255, 215, 0), 2.0)
+                elif rarity_roll < 0.15:  # 12% Epic
+                    rarity = Rarity.EPIC
+                    tier_bonus = 5
+                    self._add_floating_text("Epic Drop!", self.WINDOW_WIDTH - 200, 240, (200, 100, 255), 1.5)
+                elif rarity_roll < 0.50:  # 35% Rare
+                    rarity = Rarity.RARE
+                    tier_bonus = 3
+                    self._add_floating_text("Rare Drop!", self.WINDOW_WIDTH - 200, 240, (100, 150, 255), 1.2)
+                else:  # 50% Uncommon
+                    rarity = Rarity.UNCOMMON
+                    tier_bonus = 1
+
+                item_id = self.game.item_factory.create_item(round_num + tier_bonus, rarity=rarity)
                 self.pending_item_id = item_id
                 self.state = "item_choice"
                 self.message_log.append("The creature dropped something!")
@@ -1338,8 +1374,10 @@ class GameUI:
         # Get starting position before the turn
         start_pos = self.game.get_player_position() or 0
 
-        result = self.game.take_turn()
+        # Defer square processing until movement animation completes
+        result = self.game.take_turn(defer_square_processing=True)
         self.last_turn_result = result
+        self.square_processing_pending = True  # Will process after animation
 
         # Calculate movement path (square by square around the board)
         end_pos = self.game.get_player_position() or 0
@@ -2112,6 +2150,14 @@ class GameUI:
         # Process pending turn result after movement animation completes
         movement_done = not pm.path or pm.path_index >= len(pm.path) - 1
         if movement_done and self.pending_turn_result and not self.battle_scene.is_active():
+            # First, process the landing square now that player has arrived
+            if getattr(self, 'square_processing_pending', False):
+                # This processes combat, items, blessings, etc.
+                updated_result = self.game.process_landing_square()
+                # Merge the updated result (combat, items, etc.) with our pending result
+                self.pending_turn_result = updated_result
+                self.square_processing_pending = False
+
             result = self.pending_turn_result
             self.pending_turn_result = None
             self._process_turn_result(result)
@@ -2286,6 +2332,16 @@ class GameUI:
             # Square number
             num_text = self.font_tiny.render(str(square.index), True, (200, 200, 200))
             surface.blit(num_text, (x + 2, y + 2))
+
+        # Draw traveling merchant indicator
+        merchant_idx = self.game.get_merchant_square_index()
+        if merchant_idx != 10:  # Only show indicator if not at the shop corner
+            mx, my = self._get_square_position(merchant_idx, board_x, board_y)
+            # Draw a gold coin/bag icon to indicate merchant
+            pygame.draw.circle(surface, PALETTE['gold'], (mx + self.SQUARE_SIZE - 8, my + 8), 6)
+            pygame.draw.circle(surface, PALETTE['gold_dark'], (mx + self.SQUARE_SIZE - 8, my + 8), 6, 1)
+            # $ symbol
+            pygame.draw.line(surface, PALETTE['gold_dark'], (mx + self.SQUARE_SIZE - 8, my + 5), (mx + self.SQUARE_SIZE - 8, my + 11), 1)
 
         # Draw the chained dragon boss in center (AFTER squares)
         self._draw_chained_boss(surface, board_x, board_y)

@@ -106,7 +106,7 @@ class SpawnSystem(System):
     def initial_spawn(self, current_round: int = 1) -> List[int]:
         """
         Spawn initial content at game start.
-        - Spawns 12-16 monsters (fills most of the board)
+        - Spawns 18-22 monsters (fills almost the entire board)
         - Spawns 4-6 boons (items/blessings)
 
         Returns:
@@ -121,8 +121,8 @@ class SpawnSystem(System):
         # Shuffle for random distribution
         random.shuffle(empty_squares)
 
-        # Spawn 12-16 monsters initially (most of the board should have content)
-        num_monsters = random.randint(12, 16)
+        # Spawn 18-22 monsters initially (fill most of the board with danger!)
+        num_monsters = random.randint(18, 22)
         num_monsters = min(num_monsters, len(empty_squares))
 
         for i in range(num_monsters):

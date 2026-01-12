@@ -173,9 +173,13 @@ class GameService:
                     equipment.jewelry_slots[0] = item_id
                 self.equipment_system.recalculate_stats(self.player_id)
 
-    def take_turn(self) -> TurnResult:
+    def take_turn(self, defer_square_processing: bool = False) -> TurnResult:
         """
         Execute a complete turn.
+
+        Args:
+            defer_square_processing: If True, don't process landing square yet.
+                                    Call process_landing_square() after animation.
 
         Returns:
             TurnResult with all turn events
@@ -206,6 +210,10 @@ class GameService:
 
         result = TurnResult(move_result=move_result)
 
+        # Store for deferred processing
+        self._pending_square = move_result.square_component
+        self._pending_result = result
+
         # Check for lap completion (passed start square)
         if move_result.laps_completed > 0:
             # Heal 30% of max HP when passing start
@@ -215,18 +223,61 @@ class GameService:
                 result.healed = True
                 result.heal_amount = actual_heal
 
-            # Spawn 6-8 monsters on passing START
-            result.monsters_spawned = self._spawn_monsters_on_pass_start(player.current_round)
-
-            # Spawn 2-3 boons (chests or blessings) on empty spaces
+            # Spawn boons FIRST so they get priority on EMPTY squares
             result.boons_spawned = self._spawn_boons_on_pass_start()
+
+            # Then spawn monsters on remaining EMPTY squares
+            result.monsters_spawned = self._spawn_monsters_on_pass_start(player.current_round)
 
             # Check for boss spawn
             if player.current_round >= self.BOSS_SPAWN_ROUND and not player.boss_defeated:
                 self._spawn_boss()
 
+        # Process landing square (unless deferred for animation)
+        if not defer_square_processing:
+            square = move_result.square_component
+            if square:
+                self._process_square(square, result, player, player_stats)
+
+            # Force boss fight at round 21+ if boss is active and not yet fought
+            if (player.current_round >= self.BOSS_SPAWN_ROUND and
+                self.boss_active and
+                not player.boss_defeated and
+                not result.combat_result):
+                # The dragon has awakened - force the confrontation!
+                boss_square = self.board_factory.get_square_at(30)
+                if boss_square and boss_square.monster_entity_id:
+                    self._force_boss_fight(result, player, player_stats, boss_square)
+
+            # Check game over
+            if not player_stats.is_alive():
+                self.is_game_over = True
+                result.game_over = True
+                self._end_run()
+
+        return result
+
+    def process_landing_square(self) -> TurnResult:
+        """
+        Process the landing square after movement animation completes.
+        Call this after take_turn(defer_square_processing=True).
+
+        Returns:
+            Updated TurnResult with square processing results
+        """
+        if not self.player_id or not hasattr(self, '_pending_square'):
+            return self._pending_result if hasattr(self, '_pending_result') else TurnResult(
+                move_result=MoveResult(rolls=[0], modifier=0, total=0, roll_text="0",
+                                       from_square=0, to_square=0, laps_completed=0,
+                                       new_round=0, square_entity=None, square_component=None)
+            )
+
+        player = self.world.get_component(self.player_id, PlayerComponent)
+        player_stats = self.world.get_component(self.player_id, StatsComponent)
+        result = self._pending_result
+
         # Process landing square
-        square = move_result.square_component
+        square = self._pending_square
         if square:
             self._process_square(square, result, player, player_stats)
 
@@ -235,7 +286,6 @@ class GameService:
             self.boss_active and
             not player.boss_defeated and
             not result.combat_result):
-            # The dragon has awakened - force the confrontation!
             boss_square = self.board_factory.get_square_at(30)
             if boss_square and boss_square.monster_entity_id:
                 self._force_boss_fight(result, player, player_stats, boss_square)
@@ -245,6 +295,10 @@ class GameService:
             self.is_game_over = True
             result.game_over = True
             self._end_run()
+
+        # Clear pending state
+        self._pending_square = None
+        self._pending_result = None
 
         return result
 
