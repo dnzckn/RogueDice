@@ -66,7 +66,7 @@ class GameService:
     Main game service that orchestrates all game logic.
     """
 
-    BOSS_SPAWN_ROUND = 15  # Boss spawns after round 14
+    BOSS_SPAWN_ROUND = 10  # Boss spawns after round 9
 
     def __init__(self):
         self.world = World()

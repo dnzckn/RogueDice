@@ -84,6 +84,8 @@ class CombatResult:
     gold_earned: int = 0
     item_dropped: bool = False
     monsters_defeated: int = 1  # Number of monsters killed (for 1vX)
+    monster_max_hp: int = 0  # Monster's max HP for battle scene display
+    monster_sprite: str = ""  # Monster sprite type for battle scene
 
 
 class CombatSystem(System):
@@ -292,6 +294,10 @@ class CombatSystem(System):
                 gold_earned += bonus
                 combat.add_log(f"  [Cyberpunk] +{bonus} bonus gold!")
 
+        # Get monster sprite for battle scene
+        monster_sprite = monster_comp.sprite_name if monster_comp else "goblin"
+        monster_max_hp_val = monster_stats.max_hp if monster_stats else 100
+
         return CombatResult(
             victory=victory,
             player_hp_remaining=player_stats.current_hp,
@@ -303,6 +309,8 @@ class CombatSystem(System):
             log=combat.combat_log.copy(),
             monster_name=monster_name,
             gold_earned=gold_earned,
+            monster_max_hp=monster_max_hp_val,
+            monster_sprite=monster_sprite,
         )
 
     def run_multi_combat(self, player_id: int, monster_ids: list) -> CombatResult:
@@ -408,7 +416,7 @@ class CombatSystem(System):
 
                 if primary_target:
                     # Primary target takes full damage
-                    damage = self._calculate_damage(player_stats, primary_target['stats'])
+                    damage, is_crit = self._calculate_damage(player_stats, primary_target['stats'])
 
                     # Demonic: Damage scales with MISSING HP
                     if theme_state.demonic_has_item:
@@ -426,8 +434,9 @@ class CombatSystem(System):
                     actual_damage = primary_target['stats'].take_damage(damage)
                     combat.damage_dealt += actual_damage
 
+                    crit_text = "CRIT! " if is_crit else ""
                     combat.add_log(
-                        f"[{current_time:.1f}s] You hit {primary_target['comp'].name} for {actual_damage}! "
+                        f"[{current_time:.1f}s] {crit_text}You hit {primary_target['comp'].name} for {actual_damage}! "
                         f"({primary_target['stats'].current_hp} HP)"
                     )
 
@@ -471,10 +480,11 @@ class CombatSystem(System):
 
                     # Wind: Gust
                     if theme_state.gust_chance > 0 and random.random() < theme_state.gust_chance:
-                        gust_damage = self._calculate_damage(player_stats, primary_target['stats'])
+                        gust_damage, gust_crit = self._calculate_damage(player_stats, primary_target['stats'])
                         gust_actual = primary_target['stats'].take_damage(gust_damage)
                         combat.damage_dealt += gust_actual
-                        combat.add_log(f"  [Wind] GUST! +{gust_actual} damage!")
+                        gust_crit_text = "CRIT " if gust_crit else ""
+                        combat.add_log(f"  [Wind] {gust_crit_text}GUST! +{gust_actual} damage!")
 
                     # Process elemental procs
                     for element, scale in elemental_items:
@@ -533,12 +543,13 @@ class CombatSystem(System):
                         m['next_attack'] = current_time + attack_interval
                         continue
 
-                    damage = self._calculate_damage(m['stats'], player_stats)
+                    damage, enemy_crit = self._calculate_damage(m['stats'], player_stats)
                     actual_damage = player_stats.take_damage(damage)
                     combat.damage_taken += actual_damage
 
+                    crit_text = "CRIT! " if enemy_crit else ""
                     combat.add_log(
-                        f"[{current_time:.1f}s] {m['comp'].name} hits you for {actual_damage}! "
+                        f"[{current_time:.1f}s] {crit_text}{m['comp'].name} hits you for {actual_damage}! "
                         f"(You: {player_stats.current_hp} HP)"
                     )
 
@@ -558,6 +569,10 @@ class CombatSystem(System):
         victory = player_stats.is_alive()
         combat.end_combat(victory)
 
+        # Get first monster's stats for battle scene (use sum of max HP for multi-combat)
+        total_monster_hp = sum(m['stats'].max_hp for m in monsters)
+        first_monster_sprite = monsters[0]['comp'].sprite_name if monsters else "goblin"
+
         return CombatResult(
             victory=victory,
             player_hp_remaining=player_stats.current_hp,
@@ -570,6 +585,8 @@ class CombatSystem(System):
             monster_name=monster_names,
             gold_earned=total_gold,
             monsters_defeated=monsters_killed,
+            monster_max_hp=total_monster_hp,
+            monster_sprite=first_monster_sprite,
         )
 
     def _process_tick(
@@ -614,7 +631,7 @@ class CombatSystem(System):
                 player_stats.current_hp = max(1, player_stats.current_hp - hp_cost)
                 combat.add_log(f"  [Demonic] Blood sacrifice: -{hp_cost} HP!")
 
-            damage = self._calculate_damage(player_stats, monster_stats)
+            damage, is_crit = self._calculate_damage(player_stats, monster_stats)
 
             # Demonic: Damage scales with MISSING HP
             if theme_state.demonic_has_item:
@@ -638,8 +655,9 @@ class CombatSystem(System):
             actual_damage = monster_stats.take_damage(damage)
             combat.damage_dealt += actual_damage
 
+            crit_text = "CRIT! " if is_crit else ""
             combat.add_log(
-                f"[{current_time:.1f}s] You deal {actual_damage} damage! "
+                f"[{current_time:.1f}s] {crit_text}You deal {actual_damage} damage! "
                 f"(Enemy: {monster_stats.current_hp} HP)"
             )
 
@@ -690,10 +708,11 @@ class CombatSystem(System):
 
             # Wind: Gust - chance for free extra attack
             if theme_state.gust_chance > 0 and random.random() < theme_state.gust_chance:
-                gust_damage = self._calculate_damage(player_stats, monster_stats)
+                gust_damage, gust_crit = self._calculate_damage(player_stats, monster_stats)
                 gust_actual = monster_stats.take_damage(gust_damage)
                 combat.damage_dealt += gust_actual
-                combat.add_log(f"  [Wind] GUST! Free attack for {gust_actual} damage!")
+                gust_crit_text = "CRIT " if gust_crit else ""
+                combat.add_log(f"  [Wind] {gust_crit_text}GUST! Free attack for {gust_actual} damage!")
 
             # Earth: Tremor every 4th attack
             if theme_state.earth_damage_reduction > 0 and theme_state.attack_count % 4 == 0:
@@ -724,7 +743,7 @@ class CombatSystem(System):
                 attack_interval = 1.0 / max(0.1, monster_stats.attack_speed)
                 combat.opponent_next_attack_tick = current_time + attack_interval
             else:
-                damage = self._calculate_damage(monster_stats, player_stats)
+                damage, enemy_crit = self._calculate_damage(monster_stats, player_stats)
 
                 # Boss special moves - get monster component to check for special moves
                 monster_comp = self.world.get_component(monster_id, MonsterComponent)
@@ -749,17 +768,18 @@ class CombatSystem(System):
                     damage -= reduction
 
                 actual_damage = player_stats.take_damage(damage)
+                crit_text = "CRIT! " if enemy_crit else ""
                 combat.damage_taken += actual_damage
 
                 # Log with special move name if boss
                 if special_move_name:
                     combat.add_log(
-                        f"[{current_time:.1f}s] Enemy uses {special_move_name}! {actual_damage} damage! "
+                        f"[{current_time:.1f}s] {crit_text}Enemy uses {special_move_name}! {actual_damage} damage! "
                         f"(You: {player_stats.current_hp} HP)"
                     )
                 else:
                     combat.add_log(
-                        f"[{current_time:.1f}s] Enemy deals {actual_damage} damage! "
+                        f"[{current_time:.1f}s] {crit_text}Enemy deals {actual_damage} damage! "
                         f"(You: {player_stats.current_hp} HP)"
                     )
 
@@ -790,8 +810,13 @@ class CombatSystem(System):
         self,
         attacker: StatsComponent,
         defender: StatsComponent,
-    ) -> int:
-        """Calculate damage for a single attack."""
+    ) -> tuple:
+        """
+        Calculate damage for a single attack.
+
+        Returns:
+            Tuple of (damage: int, is_crit: bool)
+        """
         # Base damage
         damage = attacker.base_damage
 
@@ -802,7 +827,7 @@ class CombatSystem(System):
 
         # Dodge check
         if random.random() < defender.dodge_chance:
-            return 0
+            return (0, False)
 
         # Apply defense (flat reduction)
         damage -= defender.defense
@@ -814,7 +839,7 @@ class CombatSystem(System):
         damage += attacker.true_damage
 
         # Minimum 1 damage
-        return max(1, int(damage))
+        return (max(1, int(damage)), is_crit)
 
     def update(self, delta_time: float) -> None:
         """Not used - combat is run synchronously."""

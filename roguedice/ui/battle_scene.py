@@ -194,11 +194,18 @@ class BattleScene:
                         is_crit=is_crit,
                     ))
 
-            # Match enemy dealing damage - format: "[0.2s] Enemy deals 8 damage!"
-            elif "enemy deal" in line_lower and "damage" in line_lower:
+            # Match enemy dealing damage - format: "[0.2s] Enemy deals 8 damage!" or "[0.2s] Enemy uses Fire Breath! 50 damage!"
+            elif ("enemy deal" in line_lower or "enemy uses" in line_lower) and "damage" in line_lower:
                 damage = 0
                 is_crit = "crit" in line_lower or "critical" in line_lower
+                # Try multiple patterns for damage extraction
                 match = re.search(r'deals?\s+(\d+)\s+damage', line_lower)
+                if not match:
+                    # Boss special move format: "Enemy uses Fire Breath! 50 damage!"
+                    match = re.search(r'!\s*(\d+)\s+damage', line_lower)
+                if not match:
+                    # Fallback: find any number followed by "damage"
+                    match = re.search(r'(\d+)\s+damage', line_lower)
                 if match:
                     damage = int(match.group(1))
                 if damage > 0:

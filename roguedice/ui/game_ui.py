@@ -321,12 +321,14 @@ class GameUI:
         self.DRAGON_QUOTES = [
             "You're... rolling dice? In MY lair? How quaint.",
             "Round and round you go... enjoying yourself?",
-            "That's one chain down. Only seven more holding me. No pressure.",
+            "That's two chains down. Eight more holding me. No pressure.",
             "I can feel it loosening... you should probably leave.",
             "Halfway there, little adventurer. Getting nervous yet?",
-            "Three chains left. I can almost taste freedom. And you.",
+            "Four chains left. I can almost taste freedom. And you.",
+            "THREE chains. The floor is starting to shake...",
             "TWO chains. I'd start running if I were you.",
             "One chain. ONE. You should see the look on your face right now.",
+            "FREEDOM! Finally! NOW it's MY turn to roll... YOUR BONES!",
         ]
         # Random idle taunts while player explores - reference impending fight
         self.DRAGON_IDLE_TAUNTS = [
@@ -354,7 +356,7 @@ class GameUI:
         self.boss_cinematic = BossCinematic()
         self.BOSS_ENTRANCE_QUOTES = [
             "FINALLY! Do you have ANY idea how BORING it was watching you?!",
-            "15 rounds. 15 ROUNDS of you playing board games in my home!",
+            "10 rounds. 10 ROUNDS of you playing board games in my home!",
             "Oh, you thought this was YOUR game? YOUR rules? ADORABLE.",
             "I memorized every move. Every mistake. Every close call.",
             "*cracks neck* Centuries of isometrics. IN CHAINS. Let's see if it paid off.",
@@ -1499,28 +1501,19 @@ class GameUI:
             self._start_boss_cinematic(result)
             return
 
-        # Get monster name from combat result
+        # Get monster info from combat result
         monster_name = result.combat_result.monster_name or "Monster"
+        monster_type = result.combat_result.monster_sprite or "goblin"
 
-        # Map monster name to sprite type
-        monster_type_map = {
-            "goblin": "goblin", "skeleton warrior": "skeleton", "skeleton": "skeleton",
-            "dire wolf": "wolf", "wolf": "wolf", "giant spider": "spider", "spider": "spider",
-            "orc brute": "orc", "orc": "orc", "cave troll": "troll", "troll": "troll",
-            "lesser demon": "demon", "demon": "demon", "vampire lord": "vampire", "vampire": "vampire",
-            "lich king": "lich", "lich": "lich", "ancient dragon": "dragon", "dragon": "dragon",
-            "slime": "slime", "bat": "bat", "ghost": "ghost", "zombie": "zombie",
-        }
-        monster_type = monster_type_map.get(monster_name.lower(), "goblin")
+        # Use actual monster HP from combat result
+        monster_max_hp = result.combat_result.monster_max_hp
+        if monster_max_hp <= 0:
+            # Fallback if not set (shouldn't happen)
+            monster_max_hp = 50 + player.current_round * 10
 
         if is_boss:
             monster_type = "dragon"
             monster_name = "Ancient Dragon"
-
-        # Get monster HP from combat result if available
-        monster_max_hp = 50 + player.current_round * 10
-        if is_boss:
-            monster_max_hp = 200 + player.current_round * 20
 
         # Start battle scene
         self.battle_scene.start_battle(
@@ -2078,7 +2071,12 @@ class GameUI:
 
         monster_name = "Ancient Dragon"
         monster_type = "dragon"
-        monster_max_hp = 200 + player.current_round * 20
+
+        # Use actual boss HP from combat result
+        monster_max_hp = result.combat_result.monster_max_hp
+        if monster_max_hp <= 0:
+            # Fallback (shouldn't happen with properly spawned boss)
+            monster_max_hp = 12000 + player.current_round * 800
 
         # Start battle scene with entrance animation enabled
         self.battle_scene.start_battle(
@@ -2409,17 +2407,21 @@ class GameUI:
 
     def _draw_chained_boss(self, surface: pygame.Surface, board_x: int, board_y: int) -> None:
         """Draw the chained dragon boss in the board center."""
+        # Don't draw dragon in center if boss cinematic is active (dragon is animating elsewhere)
+        if self.boss_cinematic.active:
+            return
+
         center_x = board_x + self.BOARD_SIZE // 2
         center_y = board_y + self.BOARD_SIZE // 2
 
         player = self.game.get_player_data()
         current_round = player.current_round if player else 1
-        boss_round = 15  # Boss breaks free at round 15
+        boss_round = 10  # Boss breaks free at round 10
 
-        # Calculate chains remaining (all 8 chains break by round 15)
-        total_chains = 8
-        # Linear progression: lose ~1 chain every ~2 rounds
-        chains_broken = min(total_chains, (current_round * total_chains) // boss_round)
+        # Calculate chains remaining (all 10 chains break by round 10)
+        total_chains = 10
+        # Linear progression: lose 1 chain per round
+        chains_broken = min(total_chains, current_round)
         chains_remaining = total_chains - chains_broken
 
         # Detect chain break and trigger speech bubble
@@ -2458,7 +2460,7 @@ class GameUI:
         # Draw dragon
         surface.blit(dragon_display, (dragon_x, dragon_y))
 
-        # Draw chains around the dragon
+        # Draw chains around the dragon (10 chains for 10 rounds)
         chain_color = (100, 90, 80)
         chain_broken_color = (60, 55, 50, 100)
         chain_positions = [
@@ -2470,6 +2472,8 @@ class GameUI:
             (center_x + 70, center_y + 40),  # Bottom-right
             (center_x - 40, center_y - 70),  # Top-left-up
             (center_x + 40, center_y - 70),  # Top-right-up
+            (center_x, center_y - 80),       # Top-center
+            (center_x, center_y + 70),       # Bottom-center
         ]
 
         for i, (cx, cy) in enumerate(chain_positions):
@@ -2532,7 +2536,7 @@ class GameUI:
 
         # Don't taunt if dragon is free (boss fight imminent)
         player = self.game.get_player_data()
-        if player and player.current_round >= 15:
+        if player and player.current_round >= 10:
             return
 
         self.dragon_speech = random.choice(self.DRAGON_IDLE_TAUNTS)
@@ -4348,7 +4352,9 @@ class GameUI:
         diff_hp = new_item.hp_bonus - current_item.hp_bonus
         diff_spd = new_item.attack_speed_bonus - current_item.attack_speed_bonus
         diff_crit = new_item.crit_chance_bonus - current_item.crit_chance_bonus
+        diff_crit_mult = new_item.crit_multiplier_bonus - current_item.crit_multiplier_bonus
         diff_ls = new_item.life_steal_bonus - current_item.life_steal_bonus
+        diff_dodge = new_item.dodge_bonus - current_item.dodge_bonus
 
         def get_color(val):
             if val > 0:
@@ -4372,14 +4378,20 @@ class GameUI:
         if abs(diff_crit) > 0.001:
             sign = "+" if diff_crit > 0 else ""
             changes.append((f"CRIT:{sign}{diff_crit*100:.0f}%", get_color(diff_crit)))
+        if abs(diff_crit_mult) > 0.01:
+            sign = "+" if diff_crit_mult > 0 else ""
+            changes.append((f"CDMG:{sign}{diff_crit_mult:.1f}x", get_color(diff_crit_mult)))
         if abs(diff_ls) > 0.001:
             sign = "+" if diff_ls > 0 else ""
             changes.append((f"LS:{sign}{diff_ls*100:.0f}%", get_color(diff_ls)))
+        if abs(diff_dodge) > 0.001:
+            sign = "+" if diff_dodge > 0 else ""
+            changes.append((f"DOD:{sign}{diff_dodge*100:.0f}%", get_color(diff_dodge)))
 
         if not changes:
             return [("No stat change", PALETTE['gray'])]
 
-        return changes[:5]  # Limit to 5 stats
+        return changes[:6]  # Limit to 6 stats
 
     def _draw_merchant(self) -> None:
         """Draw merchant shop overlay."""
