@@ -102,6 +102,59 @@ BOSS_VICTORY_UNLOCKS = {
 
 
 @dataclass
+class MinigameMastery:
+    """Mastery bonus earned from minigame perfect wins."""
+    id: str
+    name: str
+    minigame_type: str  # Which minigame earns this
+    description: str
+    perfect_wins_required: int
+    effect_type: str  # "crit", "gold", "potion", "damage"
+    effect_value: float
+
+
+# Define all minigame masteries
+MASTERIES: Dict[str, MinigameMastery] = {
+    "timing_mastery": MinigameMastery(
+        id="timing_mastery",
+        name="Timing Mastery",
+        minigame_type="timing",
+        description="+2% crit chance",
+        perfect_wins_required=10,
+        effect_type="crit",
+        effect_value=0.02,
+    ),
+    "roulette_mastery": MinigameMastery(
+        id="roulette_mastery",
+        name="Roulette Mastery",
+        minigame_type="roulette",
+        description="+5% gold find",
+        perfect_wins_required=10,
+        effect_type="gold",
+        effect_value=0.05,
+    ),
+    "claw_mastery": MinigameMastery(
+        id="claw_mastery",
+        name="Claw Mastery",
+        minigame_type="claw",
+        description="+1 max potion",
+        perfect_wins_required=10,
+        effect_type="potion",
+        effect_value=1,
+    ),
+    "archery_mastery": MinigameMastery(
+        id="archery_mastery",
+        name="Archery Mastery",
+        minigame_type="archery",
+        description="+3 base damage",
+        perfect_wins_required=10,
+        effect_type="damage",
+        effect_value=3,
+    ),
+}
+
+
+@dataclass
 class PersistentData:
     """Data that persists between game runs. Saved to disk."""
 
@@ -122,6 +175,11 @@ class PersistentData:
 
     # Upgrade levels (upgrade_id -> level)
     upgrade_levels: Dict[str, int] = field(default_factory=dict)
+
+    # Minigame mastery tracking (minigame_type -> perfect wins count)
+    minigame_perfect_wins: Dict[str, int] = field(default_factory=dict)
+    # Minigame streak (current streak count for this run)
+    minigame_streak: int = 0
 
     # Game modes
     nightmare_mode: bool = False
@@ -223,6 +281,53 @@ class PersistentData:
         """Check if a feature is unlocked."""
         return feature_id in self.unlocked_features
 
+    def record_minigame_perfect_win(self, minigame_type: str) -> Optional[str]:
+        """
+        Record a perfect minigame win and check for mastery unlock.
+        Returns mastery id if a new mastery was unlocked, None otherwise.
+        """
+        current = self.minigame_perfect_wins.get(minigame_type, 0)
+        self.minigame_perfect_wins[minigame_type] = current + 1
+
+        # Check if this unlocks a mastery
+        for mastery_id, mastery in MASTERIES.items():
+            if mastery.minigame_type == minigame_type:
+                if current + 1 == mastery.perfect_wins_required:
+                    return mastery_id
+
+        return None
+
+    def get_minigame_perfect_wins(self, minigame_type: str) -> int:
+        """Get the number of perfect wins for a minigame type."""
+        return self.minigame_perfect_wins.get(minigame_type, 0)
+
+    def has_mastery(self, mastery_id: str) -> bool:
+        """Check if a mastery is unlocked."""
+        if mastery_id not in MASTERIES:
+            return False
+        mastery = MASTERIES[mastery_id]
+        wins = self.get_minigame_perfect_wins(mastery.minigame_type)
+        return wins >= mastery.perfect_wins_required
+
+    def get_mastery_progress(self, mastery_id: str) -> tuple:
+        """Get (current_wins, required_wins) for a mastery."""
+        if mastery_id not in MASTERIES:
+            return (0, 0)
+        mastery = MASTERIES[mastery_id]
+        wins = self.get_minigame_perfect_wins(mastery.minigame_type)
+        return (wins, mastery.perfect_wins_required)
+
+    def get_mastery_bonuses(self) -> Dict[str, float]:
+        """Get all active mastery bonuses as {effect_type: value}."""
+        bonuses = {}
+        for mastery_id, mastery in MASTERIES.items():
+            if self.has_mastery(mastery_id):
+                if mastery.effect_type in bonuses:
+                    bonuses[mastery.effect_type] += mastery.effect_value
+                else:
+                    bonuses[mastery.effect_type] = mastery.effect_value
+        return bonuses
+
     def get_starting_potions(self) -> int:
         """Get number of potions to start with."""
         return 2 if self.has_feature("extra_potion") else 1
@@ -248,6 +353,7 @@ class PersistentData:
             "selected_character": self.selected_character,
             "unlocked_features": self.unlocked_features,
             "upgrade_levels": self.upgrade_levels,
+            "minigame_perfect_wins": self.minigame_perfect_wins,
             "nightmare_mode": self.nightmare_mode,
         }
 
@@ -265,6 +371,7 @@ class PersistentData:
             selected_character=data.get("selected_character", "warrior"),
             unlocked_features=data.get("unlocked_features", []),
             upgrade_levels=data.get("upgrade_levels", {}),
+            minigame_perfect_wins=data.get("minigame_perfect_wins", {}),
             nightmare_mode=data.get("nightmare_mode", False),
         )
 

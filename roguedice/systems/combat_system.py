@@ -12,6 +12,7 @@ from ..components.player import PlayerComponent
 from ..components.equipment import EquipmentComponent
 from ..components.item import ItemComponent
 from ..models.enums import ItemTheme, Element
+from ..models.characters import get_character
 
 
 @dataclass
@@ -67,6 +68,24 @@ class ThemeEffectState:
     earth_damage_reduction: float = 0.0
     attack_count: int = 0  # For tremor every 4th attack
     tremor_delay: float = 0.3
+
+
+@dataclass
+class CharacterSynergyState:
+    """Track character-specific synergy bonuses during combat."""
+    # Death stacks crit bonus (Necromancer)
+    death_crit_bonus: float = 0.0  # +5% per stack
+
+    # Synergy bonus from matching item themes
+    synergy_active: bool = False
+    synergy_stat: str = ""  # Which stat benefits
+    synergy_bonus: float = 0.0  # Bonus multiplier
+    synergy_theme_count: int = 0  # How many items match
+
+    # Random boon (Jester)
+    random_boon_enabled: bool = False
+    current_boon: str = ""  # Active boon this combat
+    boon_value: float = 0.0  # Bonus value from boon
 
 
 @dataclass
@@ -181,6 +200,55 @@ class CombatSystem(System):
 
         return elements
 
+    def _get_character_synergy_state(self, player_id: int) -> CharacterSynergyState:
+        """Calculate character-specific synergy bonuses from equipped items."""
+        state = CharacterSynergyState()
+
+        player = self.world.get_component(player_id, PlayerComponent)
+        if not player:
+            return state
+
+        # Get character template
+        char = get_character(player.character_id)
+
+        # Death crit bonus (Necromancer)
+        if char.death_crit_bonus and player.death_stacks > 0:
+            state.death_crit_bonus = player.death_stacks * 0.05  # +5% per stack
+
+        # Random boon (Jester)
+        if char.random_boon:
+            state.random_boon_enabled = True
+
+        # Character-item synergies
+        if not char.synergy_themes:
+            return state
+
+        equipment = self.world.get_component(player_id, EquipmentComponent)
+        if not equipment:
+            return state
+
+        # Count matching themed items
+        matching_count = 0
+        for item_id in equipment.get_all_equipped():
+            if item_id is None:
+                continue
+            item = self.world.get_component(item_id, ItemComponent)
+            if not item:
+                continue
+
+            # Check if item theme matches any character synergy theme
+            item_theme_name = item.theme.name.lower() if item.theme else "none"
+            if item_theme_name in char.synergy_themes:
+                matching_count += 1
+
+        if matching_count > 0:
+            state.synergy_active = True
+            state.synergy_stat = char.synergy_stat
+            state.synergy_bonus = char.synergy_bonus * matching_count  # Stacks!
+            state.synergy_theme_count = matching_count
+
+        return state
+
     def _process_elemental_proc(
         self,
         element: Element,
@@ -268,16 +336,22 @@ class CombatSystem(System):
         combat.add_log(f"You encounter a {monster_name}!")
         combat.add_log(f"Your HP: {player_stats.current_hp}/{player_stats.max_hp}")
         combat.add_log(f"Enemy HP: {monster_stats.current_hp}/{monster_stats.max_hp}")
+        combat.add_log(f"Enemy ATK SPD: {monster_stats.attack_speed:.2f}")
 
         # Initialize theme effects
         theme_state = self._get_theme_effect_state(player_id)
         elemental_items = self._get_elemental_items(player_id)
+        synergy_state = self._get_character_synergy_state(player_id)
+
+        # Log synergy activation
+        if synergy_state.synergy_active:
+            combat.add_log(f"  [Synergy] {synergy_state.synergy_theme_count}x themed items! +{int(synergy_state.synergy_bonus * 100)}% {synergy_state.synergy_stat}!")
 
         # Run combat ticks
         while combat.in_combat and combat.combat_tick < self.MAX_TICKS:
             self._process_tick(
                 player_id, monster_id, combat, player_stats, monster_stats,
-                theme_state, elemental_items
+                theme_state, elemental_items, synergy_state
             )
 
         # Determine result
@@ -377,9 +451,18 @@ class CombatSystem(System):
         for m in monsters:
             combat.add_log(f"  {m['comp'].name}: {m['stats'].current_hp} HP")
 
-        # Initialize theme effects
+        # Initialize theme effects and synergies
         theme_state = self._get_theme_effect_state(player_id)
         elemental_items = self._get_elemental_items(player_id)
+        synergy_state = self._get_character_synergy_state(player_id)
+
+        # Get player and character for special abilities
+        player = self.world.get_component(player_id, PlayerComponent)
+        char = get_character(player.character_id) if player else None
+
+        # Log synergy activation
+        if synergy_state.synergy_active:
+            combat.add_log(f"  [Synergy] {synergy_state.synergy_theme_count}x themed items! +{int(synergy_state.synergy_bonus * 100)}% {synergy_state.synergy_stat}!")
 
         total_gold = 0
         monsters_killed = 0
@@ -388,6 +471,27 @@ class CombatSystem(System):
         while combat.in_combat and combat.combat_tick < self.MAX_TICKS:
             combat.combat_tick += 1
             current_time = combat.combat_tick * self.TICK_DURATION
+
+            # Random boon (Jester) - 10% chance per tick
+            if synergy_state.random_boon_enabled and not synergy_state.current_boon:
+                if random.random() < 0.02:
+                    boons = ["heal", "damage", "crit", "speed"]
+                    boon = random.choice(boons)
+                    synergy_state.current_boon = boon
+                    if boon == "heal":
+                        heal_amount = int(player_stats.max_hp * 0.1)
+                        player_stats.heal(heal_amount)
+                        synergy_state.boon_value = heal_amount
+                        combat.add_log(f"  [Chaos Boon] Fortune smiles! +{heal_amount} HP!")
+                    elif boon == "damage":
+                        synergy_state.boon_value = 0.25
+                        combat.add_log("  [Chaos Boon] Wild magic! +25% damage!")
+                    elif boon == "crit":
+                        synergy_state.boon_value = 0.20
+                        combat.add_log("  [Chaos Boon] Lucky streak! +20% crit!")
+                    elif boon == "speed":
+                        synergy_state.boon_value = 0.3
+                        combat.add_log("  [Chaos Boon] Hyper focus! +30% attack speed!")
 
             # Process burn DoT on primary target
             if theme_state.burn_ticks_remaining > 0:
@@ -415,8 +519,31 @@ class CombatSystem(System):
                         break
 
                 if primary_target:
+                    # Calculate extra bonuses from character abilities and synergies
+                    extra_crit = synergy_state.death_crit_bonus  # Necromancer
+                    extra_damage = 0.0
+                    ignore_defense = char.has_spells if char else False
+
+                    # Apply synergy bonuses
+                    if synergy_state.synergy_active:
+                        if synergy_state.synergy_stat == "damage":
+                            extra_damage += synergy_state.synergy_bonus
+                        elif synergy_state.synergy_stat == "crit":
+                            extra_crit += synergy_state.synergy_bonus
+
+                    # Apply random boon bonuses
+                    if synergy_state.current_boon == "damage":
+                        extra_damage += synergy_state.boon_value
+                    elif synergy_state.current_boon == "crit":
+                        extra_crit += synergy_state.boon_value
+
                     # Primary target takes full damage
-                    damage, is_crit = self._calculate_damage(player_stats, primary_target['stats'])
+                    damage, is_crit = self._calculate_damage(
+                        player_stats, primary_target['stats'],
+                        extra_crit_chance=extra_crit,
+                        ignore_defense=ignore_defense,
+                        extra_damage_mult=extra_damage,
+                    )
 
                     # Demonic: Damage scales with MISSING HP
                     if theme_state.demonic_has_item:
@@ -465,9 +592,12 @@ class CombatSystem(System):
                         theme_state.enemy_hacked = True
                         combat.add_log("  [Cyberpunk] Neural hack!")
 
-                    # Life steal on primary damage
-                    if player_stats.life_steal > 0 and actual_damage > 0:
-                        heal = int(actual_damage * player_stats.life_steal)
+                    # Life steal on primary damage (with synergy bonus)
+                    effective_life_steal = player_stats.life_steal
+                    if synergy_state.synergy_active and synergy_state.synergy_stat == "life_steal":
+                        effective_life_steal += synergy_state.synergy_bonus
+                    if effective_life_steal > 0 and actual_damage > 0:
+                        heal = int(actual_damage * effective_life_steal)
                         player_stats.heal(heal)
 
                     # Angelic: Heal percent of damage dealt
@@ -519,8 +649,11 @@ class CombatSystem(System):
                             total_gold += kill_gold
                             combat.add_log(f"  {m['comp'].name} defeated!")
 
-                # Schedule next attack
-                attack_interval = 1.0 / max(0.1, player_stats.attack_speed)
+                # Schedule next attack (with speed boon if active)
+                effective_speed = player_stats.attack_speed
+                if synergy_state.current_boon == "speed":
+                    effective_speed *= (1 + synergy_state.boon_value)
+                attack_interval = 1.0 / max(0.1, effective_speed)
                 combat.next_attack_tick = current_time + attack_interval
 
             # All alive monsters attack player
@@ -598,16 +731,44 @@ class CombatSystem(System):
         monster_stats: StatsComponent,
         theme_state: Optional[ThemeEffectState] = None,
         elemental_items: Optional[List[tuple]] = None,
+        synergy_state: Optional[CharacterSynergyState] = None,
     ) -> None:
         """Process one tick of combat."""
         combat.combat_tick += 1
         current_time = combat.combat_tick * self.TICK_DURATION
 
-        # Initialize theme state if not provided
+        # Initialize states if not provided
         if theme_state is None:
             theme_state = ThemeEffectState()
         if elemental_items is None:
             elemental_items = []
+        if synergy_state is None:
+            synergy_state = CharacterSynergyState()
+
+        # Get player for character-specific effects
+        player = self.world.get_component(player_id, PlayerComponent)
+        char = get_character(player.character_id) if player else None
+
+        # Random boon (Jester) - 10% chance per tick to get a random boon
+        if synergy_state.random_boon_enabled and not synergy_state.current_boon:
+            if random.random() < 0.02:  # ~20% chance per combat at 10 ticks/sec
+                boons = ["heal", "damage", "crit", "speed"]
+                boon = random.choice(boons)
+                synergy_state.current_boon = boon
+                if boon == "heal":
+                    heal_amount = int(player_stats.max_hp * 0.1)
+                    player_stats.heal(heal_amount)
+                    synergy_state.boon_value = heal_amount
+                    combat.add_log(f"  [Chaos Boon] Fortune smiles! +{heal_amount} HP!")
+                elif boon == "damage":
+                    synergy_state.boon_value = 0.25  # +25% damage
+                    combat.add_log("  [Chaos Boon] Wild magic! +25% damage this combat!")
+                elif boon == "crit":
+                    synergy_state.boon_value = 0.20  # +20% crit
+                    combat.add_log("  [Chaos Boon] Lucky streak! +20% crit chance!")
+                elif boon == "speed":
+                    synergy_state.boon_value = 0.3  # +30% attack speed
+                    combat.add_log("  [Chaos Boon] Hyper focus! +30% attack speed!")
 
         # Update soaked status
         if theme_state.enemy_soaked and current_time >= theme_state.soaked_until:
@@ -631,7 +792,32 @@ class CombatSystem(System):
                 player_stats.current_hp = max(1, player_stats.current_hp - hp_cost)
                 combat.add_log(f"  [Demonic] Blood sacrifice: -{hp_cost} HP!")
 
-            damage, is_crit = self._calculate_damage(player_stats, monster_stats)
+            # Calculate extra bonuses from character abilities and synergies
+            extra_crit = synergy_state.death_crit_bonus  # Necromancer death stacks
+            extra_crit_mult = 0.0
+            extra_damage = 0.0
+            ignore_defense = char.has_spells if char else False  # Mage spells
+
+            # Apply synergy bonuses based on synergy_stat
+            if synergy_state.synergy_active:
+                if synergy_state.synergy_stat == "damage":
+                    extra_damage += synergy_state.synergy_bonus
+                elif synergy_state.synergy_stat == "crit":
+                    extra_crit += synergy_state.synergy_bonus
+
+            # Apply random boon bonuses (Jester)
+            if synergy_state.current_boon == "damage":
+                extra_damage += synergy_state.boon_value
+            elif synergy_state.current_boon == "crit":
+                extra_crit += synergy_state.boon_value
+
+            damage, is_crit = self._calculate_damage(
+                player_stats, monster_stats,
+                extra_crit_chance=extra_crit,
+                extra_crit_mult=extra_crit_mult,
+                ignore_defense=ignore_defense,
+                extra_damage_mult=extra_damage,
+            )
 
             # Demonic: Damage scales with MISSING HP
             if theme_state.demonic_has_item:
@@ -670,16 +856,21 @@ class CombatSystem(System):
                     theme_state.pressure = 0
                     combat.add_log(f"  [Steampunk] STEAM BURST! +{burst} damage!")
 
-            # Magical: Mana burst with arcane amplification
+            # Magical: Mana burst with arcane amplification (and mage synergy)
             if theme_state.mana_burst_chance > 0 and random.random() < theme_state.mana_burst_chance:
                 # Amplification: consecutive bursts do more damage
                 amp_mult = 1.0 + theme_state.arcane_amplification * 0.25
-                burst_damage = int(theme_state.mana_burst_damage * amp_mult)
+                # Apply mage synergy bonus to mana burst
+                synergy_mult = 1.0
+                if synergy_state.synergy_active and synergy_state.synergy_stat == "mana_burst":
+                    synergy_mult = 1.0 + synergy_state.synergy_bonus
+                burst_damage = int(theme_state.mana_burst_damage * amp_mult * synergy_mult)
                 burst_actual = monster_stats.take_damage(burst_damage)
                 combat.damage_dealt += burst_actual
                 theme_state.arcane_amplification = min(theme_state.arcane_amplification + 1, 3)
                 amp_text = f" [x{theme_state.arcane_amplification} AMPLIFIED]" if theme_state.arcane_amplification > 1 else ""
-                combat.add_log(f"  [Mana Burst] +{burst_actual} arcane damage!{amp_text}")
+                synergy_text = " [Synergy!]" if synergy_mult > 1 else ""
+                combat.add_log(f"  [Mana Burst] +{burst_actual} arcane damage!{amp_text}{synergy_text}")
             else:
                 # Reset amplification on miss
                 if theme_state.mana_burst_chance > 0:
@@ -690,12 +881,16 @@ class CombatSystem(System):
                 theme_state.enemy_hacked = True
                 combat.add_log("  [Cyberpunk] Neural hack! Enemy systems compromised!")
 
-            # Life steal
-            if player_stats.life_steal > 0 and actual_damage > 0:
-                heal = int(actual_damage * player_stats.life_steal)
+            # Life steal (with synergy bonus)
+            effective_life_steal = player_stats.life_steal
+            if synergy_state.synergy_active and synergy_state.synergy_stat == "life_steal":
+                effective_life_steal += synergy_state.synergy_bonus
+            if effective_life_steal > 0 and actual_damage > 0:
+                heal = int(actual_damage * effective_life_steal)
                 player_stats.heal(heal)
                 if heal > 0:
-                    combat.add_log(f"  [Life steal: +{heal} HP]")
+                    synergy_text = " [Synergy!]" if synergy_state.synergy_stat == "life_steal" else ""
+                    combat.add_log(f"  [Life steal: +{heal} HP]{synergy_text}")
 
             # Angelic: Heal percent of damage dealt (doubled when desperate)
             if theme_state.angelic_heal_percent > 0 and actual_damage > 0:
@@ -725,8 +920,11 @@ class CombatSystem(System):
                     element, scale, theme_state, combat, current_time, player_stats
                 )
 
-            # Schedule next attack
-            attack_interval = 1.0 / max(0.1, player_stats.attack_speed)
+            # Schedule next attack (with speed boon if active)
+            effective_speed = player_stats.attack_speed
+            if synergy_state.current_boon == "speed":
+                effective_speed *= (1 + synergy_state.boon_value)
+            attack_interval = 1.0 / max(0.1, effective_speed)
             combat.next_attack_tick = current_time + attack_interval
 
         # Monster attack
@@ -810,9 +1008,21 @@ class CombatSystem(System):
         self,
         attacker: StatsComponent,
         defender: StatsComponent,
+        extra_crit_chance: float = 0.0,
+        extra_crit_mult: float = 0.0,
+        ignore_defense: bool = False,
+        extra_damage_mult: float = 0.0,
     ) -> tuple:
         """
         Calculate damage for a single attack.
+
+        Args:
+            attacker: Attacker stats
+            defender: Defender stats
+            extra_crit_chance: Bonus crit chance (e.g., from death stacks)
+            extra_crit_mult: Bonus crit multiplier
+            ignore_defense: If True, damage ignores defense (spells)
+            extra_damage_mult: Bonus damage multiplier from synergies
 
         Returns:
             Tuple of (damage: int, is_crit: bool)
@@ -820,20 +1030,28 @@ class CombatSystem(System):
         # Base damage
         damage = attacker.base_damage
 
-        # Critical hit check
-        is_crit = random.random() < attacker.crit_chance
+        # Apply extra damage multiplier (synergies)
+        if extra_damage_mult > 0:
+            damage = int(damage * (1 + extra_damage_mult))
+
+        # Critical hit check with bonus
+        effective_crit_chance = attacker.crit_chance + extra_crit_chance
+        is_crit = random.random() < effective_crit_chance
         if is_crit:
-            damage *= attacker.crit_multiplier
+            effective_crit_mult = attacker.crit_multiplier + extra_crit_mult
+            damage *= effective_crit_mult
 
         # Dodge check
         if random.random() < defender.dodge_chance:
             return (0, False)
 
-        # Apply defense (flat reduction)
-        damage -= defender.defense
+        # Apply defense (flat reduction) - unless spell
+        if not ignore_defense:
+            damage -= defender.defense
 
-        # Apply resistance (percentage reduction)
-        damage *= (1 - defender.resistance)
+        # Apply resistance (percentage reduction) - unless spell
+        if not ignore_defense:
+            damage *= (1 - defender.resistance)
 
         # Add true damage (ignores defenses)
         damage += attacker.true_damage

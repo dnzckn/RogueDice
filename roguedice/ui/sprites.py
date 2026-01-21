@@ -1379,25 +1379,78 @@ class SpriteGenerator:
     def _create_panel_impl(self, width: int, height: int, style: str) -> pygame.Surface:
         surf = pygame.Surface((width, height), pygame.SRCALPHA)
 
+        # Style definitions with gradients
         if style == "gold":
             bg = (30, 28, 25)
             border = PALETTE['gold_dark']
             highlight = PALETTE['gold']
+            use_gradient = False
         elif style == "red":
             bg = (35, 25, 25)
             border = PALETTE['red_dark']
             highlight = PALETTE['red']
+            use_gradient = False
         elif style == "purple":
             bg = (30, 25, 35)
             border = PALETTE['purple_dark']
             highlight = PALETTE['purple']
+            use_gradient = False
+        elif style == "stats":
+            # Deep blue gradient with gold border - for HP, Gold, Round panels
+            bg_top = (15, 25, 55)
+            bg_bottom = (8, 15, 35)
+            border = PALETTE['gold_dark']
+            highlight = PALETTE['gold']
+            use_gradient = True
+        elif style == "equipment":
+            # Dark slate - for equipment panels
+            bg_top = (35, 38, 45)
+            bg_bottom = (22, 25, 32)
+            border = (70, 75, 85)
+            highlight = (100, 105, 115)
+            use_gradient = True
+        elif style == "blessings":
+            # Purple mystical gradient - for blessings panel
+            bg_top = (45, 25, 60)
+            bg_bottom = (25, 12, 35)
+            border = PALETTE['purple']
+            highlight = PALETTE['purple_light']
+            use_gradient = True
+        elif style == "actions":
+            # Warm brown wood texture - for dice/actions panel
+            bg_top = (55, 40, 28)
+            bg_bottom = (35, 25, 18)
+            border = (100, 70, 45)
+            highlight = (140, 100, 70)
+            use_gradient = True
+        elif style == "battle":
+            # Dark arena - for battle-related panels
+            bg_top = (25, 20, 22)
+            bg_bottom = (12, 10, 12)
+            border = (80, 30, 30)
+            highlight = (120, 50, 50)
+            use_gradient = True
         else:
             bg = PALETTE['panel_bg']
             border = PALETTE['panel_border']
             highlight = PALETTE['panel_highlight']
+            use_gradient = False
 
-        # Main background with rounded corners
-        pygame.draw.rect(surf, bg, (0, 0, width, height), border_radius=6)
+        # Draw background (with or without gradient)
+        if use_gradient:
+            # Draw gradient background
+            for y in range(height):
+                ratio = y / max(1, height - 1)
+                r = int(bg_top[0] + (bg_bottom[0] - bg_top[0]) * ratio)
+                g = int(bg_top[1] + (bg_bottom[1] - bg_top[1]) * ratio)
+                b = int(bg_top[2] + (bg_bottom[2] - bg_top[2]) * ratio)
+                pygame.draw.line(surf, (r, g, b), (0, y), (width - 1, y))
+            # Apply rounded corners by drawing corner masks
+            mask = pygame.Surface((width, height), pygame.SRCALPHA)
+            pygame.draw.rect(mask, (255, 255, 255, 255), (0, 0, width, height), border_radius=6)
+            surf.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+        else:
+            pygame.draw.rect(surf, bg, (0, 0, width, height), border_radius=6)
 
         # Inner border
         pygame.draw.rect(surf, border, (2, 2, width - 4, height - 4),
@@ -1411,6 +1464,23 @@ class SpriteGenerator:
         corners = [(4, 4), (width - 4, 4), (4, height - 4), (width - 4, height - 4)]
         for cx, cy in corners:
             pygame.draw.circle(surf, highlight, (cx, cy), 2)
+
+        # Style-specific decorations
+        if style == "stats":
+            # Add subtle inner glow at top for stats panel
+            for i in range(3):
+                alpha = 40 - i * 12
+                pygame.draw.line(surf, (*PALETTE['gold'], alpha), (6, 6 + i), (width - 6, 6 + i))
+        elif style == "blessings":
+            # Add mystical shimmer effect
+            for i in range(4):
+                alpha = 30 - i * 7
+                pygame.draw.line(surf, (*PALETTE['purple_light'], alpha), (6, 6 + i), (width - 6, 6 + i))
+        elif style == "actions":
+            # Add wood grain texture lines
+            for i in range(0, height, 12):
+                alpha = 20 + (i % 24)
+                pygame.draw.line(surf, (80, 55, 35, alpha), (4, i), (width - 4, i))
 
         return surf
 

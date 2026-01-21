@@ -59,6 +59,13 @@ class PlayerFactory:
             base_speed += persistent.get_upgrade_effect("swiftness")
             base_life_steal += persistent.get_upgrade_effect("vampirism")
 
+            # Apply minigame mastery bonuses
+            mastery_bonuses = persistent.get_mastery_bonuses()
+            if "crit" in mastery_bonuses:
+                base_crit += mastery_bonuses["crit"]  # Timing mastery
+            if "damage" in mastery_bonuses:
+                base_damage += mastery_bonuses["damage"]  # Archery mastery
+
         # Stats
         stats = StatsComponent(
             max_hp=base_hp,
@@ -80,17 +87,27 @@ class PlayerFactory:
         starting_potions = 1
         starting_gold = 0
         gold_mult = character.gold_mult
+        max_potions = 1
 
         if persistent:
             starting_potions = persistent.get_starting_potions()
+            max_potions = starting_potions
             starting_gold = int(persistent.get_upgrade_effect("prosperity"))
+
+            # Apply minigame mastery bonuses for gold and potions
+            mastery_bonuses = persistent.get_mastery_bonuses()
+            if "gold" in mastery_bonuses:
+                gold_mult += mastery_bonuses["gold"]  # Roulette mastery
+            if "potion" in mastery_bonuses:
+                max_potions += int(mastery_bonuses["potion"])  # Claw mastery
+                starting_potions += int(mastery_bonuses["potion"])
 
         # Player data
         player = PlayerComponent(
             name=name,
             character_id=character_id,
             potion_count=starting_potions,
-            max_potions=starting_potions,  # Max matches starting
+            max_potions=max_potions,
             gold=starting_gold,
             gold_multiplier=gold_mult,
         )

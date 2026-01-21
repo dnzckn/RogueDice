@@ -47,6 +47,14 @@ class CharacterTemplate:
     combo_master: bool = False  # Builds combo stacks for damage
     chaos_rolls: bool = False  # Random dice type each roll
     death_stacks: bool = False  # Stacks power from kills
+    death_crit_bonus: bool = False  # Death stacks also grant crit bonus
+    random_boon: bool = False  # Chance for random positive effect each turn
+
+    # Equipment synergy bonuses: theme -> (stat, bonus)
+    # e.g., {"magical": ("mana_burst", 0.2)} = +20% mana burst damage with magical items
+    synergy_themes: List[str] = field(default_factory=list)  # Item themes that synergize
+    synergy_bonus: float = 0.0  # Bonus percentage when synergy active
+    synergy_stat: str = ""  # Which stat benefits from synergy
 
     @property
     def pros(self) -> str:
@@ -181,6 +189,9 @@ CHARACTERS: Dict[str, CharacterTemplate] = {
         life_steal_base=0.15,
         damage_taken_mult=1.2,
         rage_mode=True,  # +50% damage when below 30% HP
+        synergy_themes=["demonic", "elemental"],
+        synergy_bonus=0.15,
+        synergy_stat="damage",  # +15% damage with demonic/elemental items
     ),
 
     "monk": CharacterTemplate(
@@ -229,6 +240,9 @@ CHARACTERS: Dict[str, CharacterTemplate] = {
         life_steal_base=0.25,  # 25% life steal
         vampiric=True,  # Also heals 10% of movement as HP
         attack_speed_mult=1.15,
+        synergy_themes=["demonic", "angelic"],
+        synergy_bonus=0.15,
+        synergy_stat="life_steal",  # +15% life steal with demonic/angelic items
     ),
 
     "mage": CharacterTemplate(
@@ -245,6 +259,9 @@ CHARACTERS: Dict[str, CharacterTemplate] = {
         has_spells=True,  # Damage ignores defense
         crit_chance_mult=1.3,
         crit_damage_mult=2.0,  # Devastating crits
+        synergy_themes=["magical"],
+        synergy_bonus=0.25,
+        synergy_stat="mana_burst",  # +25% mana burst damage with magical items
     ),
 
     "necromancer": CharacterTemplate(
@@ -254,13 +271,17 @@ CHARACTERS: Dict[str, CharacterTemplate] = {
         flavor_text="The fallen fuel my ascension. Death begets power.",
         dice_formula="1d6",
         dice_special="none",  # But gains +1 die size per 5 kills!
-        dice_description="1d6 (+1 die size per 5 kills)",
+        dice_description="1d6 (+1 die size per 5 kills, +5% crit per stack)",
         cost=1100,
         hp_mult=0.8,
         damage_mult=0.9,
         defense_mult=0.8,
         death_stacks=True,  # Dice grow: d6 -> d8 -> d10 -> d12 -> d20
+        death_crit_bonus=True,  # Also +5% crit per death stack
         life_steal_base=0.1,
+        synergy_themes=["demonic"],
+        synergy_bonus=0.20,
+        synergy_stat="life_steal",  # +20% life steal with demonic items
     ),
 
     # ========== TIER 4 UNLOCKS (1500g+) ==========
@@ -271,13 +292,14 @@ CHARACTERS: Dict[str, CharacterTemplate] = {
         flavor_text="d4? d20? WHO KNOWS! That's the fun part!",
         dice_formula="1d?",  # Special: random die each roll
         dice_special="random_dice",
-        dice_description="Random die type each roll!",
+        dice_description="Random die type each roll! 10% random boon chance",
         cost=1500,
         hp_mult=1.0,
         damage_mult=1.0,
         gold_mult=1.25,
         crit_chance_mult=1.1,
         chaos_rolls=True,
+        random_boon=True,  # 10% chance for random positive effect each turn
     ),
 
     "avatar": CharacterTemplate(
@@ -292,9 +314,9 @@ CHARACTERS: Dict[str, CharacterTemplate] = {
         hp_mult=1.2,
         damage_mult=1.15,
         defense_mult=1.15,
-        attack_speed_mult=1.1,
+        attack_speed_mult=1.0,  # Balanced: reduced from 1.1
         crit_chance_mult=1.15,
-        life_steal_base=0.1,
+        life_steal_base=0.0,  # Balanced: removed life steal
         heal_on_rest_mult=1.5,
     ),
 }

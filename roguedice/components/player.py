@@ -41,6 +41,11 @@ class PlayerComponent(Component):
     last_roll_exploded: bool = False
     last_roll_cursed: bool = False
 
+    # Fate Points system for dice manipulation
+    fate_points: int = 0
+    locked_die_value: Optional[int] = None  # Value locked for next N rolls
+    locked_die_rolls_left: int = 0  # How many rolls the lock persists
+
     # Sprite info
     sprite_name: str = "player"
 
@@ -54,6 +59,9 @@ class PlayerComponent(Component):
 
         # Tick blessing durations
         self.tick_blessings()
+
+        # Award fate points for lap completion
+        self.add_fate_points(2)
 
         return True
 
@@ -88,6 +96,53 @@ class PlayerComponent(Component):
         # Monk combo stacks
         if char.combo_master:
             self.combo_stacks += 1
+
+        # Award fate points for kills
+        self.add_fate_points(1)
+
+    def add_fate_points(self, amount: int) -> None:
+        """Add fate points (capped at 10)."""
+        self.fate_points = min(10, self.fate_points + amount)
+
+    def use_fate_nudge(self) -> bool:
+        """Use Nudge ability (1 FP): +1 or -1 to die. Returns True if successful."""
+        if self.fate_points >= 1:
+            self.fate_points -= 1
+            return True
+        return False
+
+    def use_fate_reroll(self) -> bool:
+        """Use Reroll ability (2 FP): Reroll all dice. Returns True if successful."""
+        if self.fate_points >= 2:
+            self.fate_points -= 2
+            return True
+        return False
+
+    def use_fate_lock(self, value: int) -> bool:
+        """Use Lock ability (2 FP): Lock one die value for next 2 rolls. Returns True if successful."""
+        if self.fate_points >= 2:
+            self.fate_points -= 2
+            self.locked_die_value = value
+            self.locked_die_rolls_left = 2
+            return True
+        return False
+
+    def use_fate_roll(self) -> bool:
+        """Use Fate Roll ability (3 FP): Roll twice, pick preferred. Returns True if successful."""
+        if self.fate_points >= 3:
+            self.fate_points -= 3
+            return True
+        return False
+
+    def consume_locked_die(self) -> Optional[int]:
+        """Consume one use of locked die. Returns locked value if active, None otherwise."""
+        if self.locked_die_value is not None and self.locked_die_rolls_left > 0:
+            value = self.locked_die_value
+            self.locked_die_rolls_left -= 1
+            if self.locked_die_rolls_left <= 0:
+                self.locked_die_value = None
+            return value
+        return None
 
     def on_doubles_rolled(self, roll_total: int) -> None:
         """Called when doubles are rolled."""

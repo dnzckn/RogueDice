@@ -39,6 +39,34 @@ class BattleAction:
     is_crit: bool = False
     attacker_name: str = ""
     target_name: str = ""
+    special_move: str = ""  # Boss special move name (e.g., "Fire Breath")
+    special_anim: str = ""  # Animation type (e.g., "fire", "swipe", "roar")
+
+
+class QTEDifficulty(Enum):
+    """QTE difficulty settings."""
+    OFF = 0
+    EASY = 1
+    NORMAL = 2
+    HARD = 3
+
+
+@dataclass
+class QTEState:
+    """Quick-Time Event state during combat."""
+    active: bool = False
+    qte_type: str = ""  # "block", "crit", "dodge"
+    timer: float = 0.0
+    duration: float = 1.5  # Time window to react
+    bar_position: float = 0.0  # For timing bar (0-1)
+    bar_direction: int = 1  # 1 = right, -1 = left
+    bar_speed: float = 2.0  # Speed of timing bar
+    sweet_spot_start: float = 0.4
+    sweet_spot_end: float = 0.6
+    required_key: str = ""  # Key to press for dodge
+    result: Optional[str] = None  # "success", "fail", None
+    damage_reduction: float = 0.0  # Damage reduction on success
+    pending_damage: int = 0  # Damage to modify if QTE succeeds
 
 
 @dataclass
@@ -69,6 +97,7 @@ class BattleState:
     # Flash effects
     player_flash: float = 0.0
     monster_flash: float = 0.0
+    player_flash_color: tuple = (255, 100, 100)  # Default red, changes with special moves
 
     # Attack animation
     player_attack_anim: float = 0.0
@@ -83,6 +112,11 @@ class BattleState:
 
     # Speed
     speed: BattleSpeed = BattleSpeed.NORMAL
+
+    # QTE state
+    qte: QTEState = field(default_factory=QTEState)
+    qte_enabled: bool = True
+    qte_difficulty: QTEDifficulty = QTEDifficulty.NORMAL
 
     def is_complete(self) -> bool:
         """Check if all actions have played."""
@@ -104,10 +138,10 @@ class BattleScene:
         self.panel_x = screen_width - self.PANEL_WIDTH - 20
         self.panel_y = 170
 
-        # Fonts
-        self.font_large = pygame.font.Font(None, 28)
-        self.font_medium = pygame.font.Font(None, 20)
-        self.font_small = pygame.font.Font(None, 16)
+        # Fonts (increased by 4px for readability)
+        self.font_large = pygame.font.Font(None, 32)
+        self.font_medium = pygame.font.Font(None, 24)
+        self.font_small = pygame.font.Font(None, 20)
 
         # Battle state
         self.state = BattleState()
@@ -130,6 +164,10 @@ class BattleScene:
 
         # Completion delay timer
         self._completion_timer: float = 0.0
+
+        # QTE settings
+        self.qte_difficulty = QTEDifficulty.NORMAL
+        self.qte_enabled = True
 
     def start_battle(self, char_id: str, monster_type: str, monster_name: str,
                      is_boss: bool, combat_result: CombatResult,
@@ -198,6 +236,26 @@ class BattleScene:
             elif ("enemy deal" in line_lower or "enemy uses" in line_lower) and "damage" in line_lower:
                 damage = 0
                 is_crit = "crit" in line_lower or "critical" in line_lower
+                special_move = ""
+                special_anim = ""
+
+                # Extract special move name from "Enemy uses X!" format (use original case)
+                move_match = re.search(r'[Ee]nemy uses ([^!]+)!', line)
+                if move_match:
+                    special_move = move_match.group(1).strip()
+                    # Determine animation type based on move name
+                    move_lower = special_move.lower()
+                    if "fire" in move_lower or "breath" in move_lower:
+                        special_anim = "fire"
+                    elif "tail" in move_lower or "swipe" in move_lower or "slash" in move_lower or "claw" in move_lower:
+                        special_anim = "slash"
+                    elif "roar" in move_lower:
+                        special_anim = "roar"
+                    elif "wind" in move_lower or "gust" in move_lower or "wing" in move_lower:
+                        special_anim = "wind"
+                    else:
+                        special_anim = "attack"
+
                 # Try multiple patterns for damage extraction
                 match = re.search(r'deals?\s+(\d+)\s+damage', line_lower)
                 if not match:
@@ -208,12 +266,14 @@ class BattleScene:
                     match = re.search(r'(\d+)\s+damage', line_lower)
                 if match:
                     damage = int(match.group(1))
-                if damage > 0:
-                    actions.append(BattleAction(
-                        action_type="monster_attack",
-                        damage=damage,
-                        is_crit=is_crit,
-                    ))
+                # Always add monster attacks, even if 0 damage (dodge/block)
+                actions.append(BattleAction(
+                    action_type="monster_attack",
+                    damage=damage,
+                    is_crit=is_crit,
+                    special_move=special_move,
+                    special_anim=special_anim,
+                ))
 
             # Match bonus player damage - burn, steam burst, mana burst, gust, cleave
             # Format: "[Burn] Enemy takes X fire damage!" or "+X damage!" or "for X damage!"
@@ -264,6 +324,15 @@ class BattleScene:
                 else:
                     actions.append(BattleAction(action_type="player_dodge"))  # Player attack missed
 
+            # Monster CC'd (paralyzed/flinched) - shows monster tried to attack
+            elif "[paralyzed]" in line_lower or "[flinched]" in line_lower:
+                if "enemy" in line_lower:
+                    actions.append(BattleAction(
+                        action_type="monster_attack",
+                        damage=0,
+                        is_crit=False,
+                    ))
+
         return actions
 
     def update(self, dt: float) -> None:
@@ -287,6 +356,11 @@ class BattleScene:
                 self.state.monster_entrance = False
                 self.state.monster_entrance_x = 0
             return  # Don't process combat during entrance
+
+        # Update QTE if active (pauses combat action processing)
+        if self.state.qte.active:
+            self._update_qte(dt)
+            return
 
         # Update action timer
         self.state.action_timer += dt * speed_mult
@@ -375,19 +449,41 @@ class BattleScene:
             ))
 
         elif action.action_type == "monster_attack":
+            # Try to trigger QTE for this attack (only for damaging attacks)
+            if action.damage > 0 and self._maybe_trigger_qte(action):
+                # QTE triggered - pause here and wait for input
+                return
+
             self.state.monster_attack_anim = 1.0
-            self.state.player_shake = 1.0
-            self.state.player_flash = 1.0
+            if action.damage > 0:
+                # Shake intensity and flash color based on special move
+                if action.special_anim == "fire":
+                    self.state.player_shake = 1.5  # Fire breath is intense
+                    self.state.player_flash_color = (255, 120, 50)  # Orange/fire
+                elif action.special_anim == "wind":
+                    self.state.player_shake = 0.8
+                    self.state.player_flash_color = (150, 255, 150)  # Green/wind
+                elif action.special_anim == "roar":
+                    self.state.player_shake = 0.5  # Roar is more stagger
+                    self.state.player_flash_color = (200, 150, 255)  # Purple/sonic
+                elif action.special_anim == "slash":
+                    self.state.player_shake = 1.2
+                    self.state.player_flash_color = (255, 100, 100)  # Red/physical
+                else:
+                    self.state.player_shake = 1.0
+                    self.state.player_flash_color = (255, 100, 100)  # Default red
+                self.state.player_flash = 1.0
             self.state.target_player_hp = max(0, self.state.target_player_hp - action.damage)
 
-            # Add damage popup on player (panel-relative)
-            self.state.damage_popups.append(DamagePopup(
-                value=action.damage,
-                x=player_x,
-                y=player_y,
-                is_crit=action.is_crit,
-                is_player=False,
-            ))
+            # Add damage popup on player (panel-relative) - skip for 0 damage (CC'd/dodged)
+            if action.damage > 0:
+                self.state.damage_popups.append(DamagePopup(
+                    value=action.damage,
+                    x=player_x,
+                    y=player_y,
+                    is_crit=action.is_crit,
+                    is_player=False,
+                ))
 
         elif action.action_type == "player_heal":
             self.state.target_player_hp = min(self.player_max_hp,
@@ -433,6 +529,10 @@ class BattleScene:
 
         # Draw speed indicator on panel
         self._draw_speed_indicator(panel)
+
+        # Draw QTE if active or showing result
+        if self.state.qte.active or self.state.qte.result:
+            self._draw_qte(panel)
 
         # Draw result if battle complete
         if self.is_complete():
@@ -488,10 +588,11 @@ class BattleScene:
         # Draw sprite
         sprite = self._player_sprite.copy()
 
-        # Flash effect (damage taken)
+        # Flash effect (damage taken) - color varies by special move type
         if self.state.player_flash > 0:
             flash_surf = pygame.Surface(sprite.get_size(), pygame.SRCALPHA)
-            flash_surf.fill((255, 100, 100, int(150 * self.state.player_flash)))
+            r, g, b = self.state.player_flash_color
+            flash_surf.fill((r, g, b, int(150 * self.state.player_flash)))
             sprite.blit(flash_surf, (0, 0), special_flags=pygame.BLEND_RGBA_ADD)
 
         surface.blit(sprite, (x - 40, y - 60))
@@ -590,7 +691,13 @@ class BattleScene:
                 if action.is_crit:
                     text = f"CRIT! {action.damage} dmg!"
             elif action.action_type == "monster_attack":
-                text = f"{self.monster_name}: {action.damage} dmg!"
+                if action.damage > 0:
+                    if action.special_move:
+                        text = f"{action.special_move}! {action.damage} dmg!"
+                    else:
+                        text = f"{self.monster_name}: {action.damage} dmg!"
+                else:
+                    text = f"{self.monster_name} is stunned!"
             elif action.action_type == "player_heal":
                 text = f"Heal +{action.damage}!"
             elif action.action_type == "player_dodge":
@@ -701,7 +808,200 @@ class BattleScene:
         )
         return (self.state.current_action_index >= len(self.state.actions)
                 and hp_done
-                and self._completion_timer >= 1.2)  # 1.2 seconds to see HP at 0
+                and self._completion_timer >= 1.2  # 1.2 seconds to see HP at 0
+                and not self.state.qte.active)  # Wait for QTE to finish
+
+    # =========================================================================
+    # QTE (Quick-Time Event) System
+    # =========================================================================
+
+    def set_qte_difficulty(self, difficulty: QTEDifficulty) -> None:
+        """Set QTE difficulty level."""
+        self.qte_difficulty = difficulty
+        self.qte_enabled = difficulty != QTEDifficulty.OFF
+
+    def _maybe_trigger_qte(self, action: BattleAction) -> bool:
+        """Maybe trigger a QTE for an incoming monster attack."""
+        if not self.qte_enabled or self.qte_difficulty == QTEDifficulty.OFF:
+            return False
+
+        # Only trigger QTE for monster attacks
+        if action.action_type != "monster_attack" or action.damage <= 0:
+            return False
+
+        # Random chance based on difficulty
+        import random
+        trigger_chance = {
+            QTEDifficulty.EASY: 0.2,
+            QTEDifficulty.NORMAL: 0.35,
+            QTEDifficulty.HARD: 0.5,
+        }
+        if random.random() > trigger_chance.get(self.qte_difficulty, 0.35):
+            return False
+
+        # Choose QTE type
+        qte_types = ["block", "dodge"]
+        qte_type = random.choice(qte_types)
+
+        # Configure QTE based on difficulty
+        speed = {
+            QTEDifficulty.EASY: 1.5,
+            QTEDifficulty.NORMAL: 2.5,
+            QTEDifficulty.HARD: 4.0,
+        }
+        sweet_spot = {
+            QTEDifficulty.EASY: (0.35, 0.65),
+            QTEDifficulty.NORMAL: (0.4, 0.6),
+            QTEDifficulty.HARD: (0.45, 0.55),
+        }
+        ss = sweet_spot.get(self.qte_difficulty, (0.4, 0.6))
+
+        # Dodge uses arrow keys
+        dodge_keys = ["LEFT", "RIGHT", "UP", "DOWN"]
+        required_key = random.choice(dodge_keys) if qte_type == "dodge" else "SPACE"
+
+        self.state.qte = QTEState(
+            active=True,
+            qte_type=qte_type,
+            timer=0.0,
+            duration=1.5,
+            bar_position=0.0,
+            bar_direction=1,
+            bar_speed=speed.get(self.qte_difficulty, 2.5),
+            sweet_spot_start=ss[0],
+            sweet_spot_end=ss[1],
+            required_key=required_key,
+            result=None,
+            damage_reduction=0.5 if qte_type == "block" else 1.0,  # Block = 50%, Dodge = 100%
+            pending_damage=action.damage,
+        )
+        return True
+
+    def handle_qte_input(self, key: int) -> Optional[str]:
+        """Handle input during QTE. Returns result if QTE ended."""
+        if not self.state.qte.active:
+            return None
+
+        import pygame
+        qte = self.state.qte
+
+        success = False
+        if qte.qte_type == "block":
+            # Block QTE - press SPACE in sweet spot
+            if key == pygame.K_SPACE:
+                if qte.sweet_spot_start <= qte.bar_position <= qte.sweet_spot_end:
+                    success = True
+                qte.result = "success" if success else "fail"
+                qte.active = False
+
+        elif qte.qte_type == "dodge":
+            # Dodge QTE - press correct arrow key
+            key_map = {
+                pygame.K_LEFT: "LEFT",
+                pygame.K_RIGHT: "RIGHT",
+                pygame.K_UP: "UP",
+                pygame.K_DOWN: "DOWN",
+            }
+            pressed_key = key_map.get(key, "")
+            if pressed_key:
+                if pressed_key == qte.required_key:
+                    success = True
+                qte.result = "success" if success else "fail"
+                qte.active = False
+
+        if qte.result:
+            return qte.result
+        return None
+
+    def _update_qte(self, dt: float) -> None:
+        """Update QTE state."""
+        qte = self.state.qte
+        if not qte.active:
+            return
+
+        qte.timer += dt
+
+        # Update timing bar position
+        qte.bar_position += qte.bar_direction * qte.bar_speed * dt
+        if qte.bar_position >= 1.0:
+            qte.bar_position = 1.0
+            qte.bar_direction = -1
+        elif qte.bar_position <= 0.0:
+            qte.bar_position = 0.0
+            qte.bar_direction = 1
+
+        # Timeout - fail the QTE
+        if qte.timer >= qte.duration:
+            qte.result = "fail"
+            qte.active = False
+
+    def _draw_qte(self, surface: pygame.Surface) -> None:
+        """Draw QTE overlay on battle panel."""
+        qte = self.state.qte
+        if not qte.active and not qte.result:
+            return
+
+        w, h = self.PANEL_WIDTH, self.PANEL_HEIGHT
+
+        # Semi-transparent overlay
+        if qte.active:
+            overlay = pygame.Surface((w, h), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 100))
+            surface.blit(overlay, (0, 0))
+
+        if qte.active:
+            # QTE prompt
+            if qte.qte_type == "block":
+                title = "BLOCK! Press SPACE!"
+                title_color = PALETTE['cyan']
+            else:
+                title = f"DODGE! Press [{qte.required_key}]!"
+                title_color = PALETTE['green']
+
+            title_text = self.font_large.render(title, True, title_color)
+            surface.blit(title_text, (w // 2 - title_text.get_width() // 2, 80))
+
+            # Timing bar (for block)
+            if qte.qte_type == "block":
+                bar_x, bar_y = 50, 130
+                bar_w, bar_h = w - 100, 30
+
+                # Bar background
+                pygame.draw.rect(surface, (40, 40, 50), (bar_x, bar_y, bar_w, bar_h), border_radius=5)
+
+                # Sweet spot
+                ss_x = bar_x + int(qte.sweet_spot_start * bar_w)
+                ss_w = int((qte.sweet_spot_end - qte.sweet_spot_start) * bar_w)
+                pygame.draw.rect(surface, (60, 180, 60), (ss_x, bar_y, ss_w, bar_h), border_radius=5)
+
+                # Indicator
+                ind_x = bar_x + int(qte.bar_position * bar_w)
+                pygame.draw.rect(surface, PALETTE['gold'], (ind_x - 3, bar_y - 5, 6, bar_h + 10), border_radius=2)
+
+            # Timer bar
+            time_left = max(0, qte.duration - qte.timer)
+            timer_w = int((time_left / qte.duration) * (w - 100))
+            pygame.draw.rect(surface, (200, 50, 50), (50, 170, timer_w, 8), border_radius=3)
+
+        # Result flash
+        elif qte.result:
+            result_text = "BLOCKED!" if qte.result == "success" and qte.qte_type == "block" else (
+                "DODGED!" if qte.result == "success" else "MISSED!"
+            )
+            result_color = PALETTE['green'] if qte.result == "success" else PALETTE['red']
+            text = self.font_large.render(result_text, True, result_color)
+            surface.blit(text, (w // 2 - text.get_width() // 2, 100))
+
+    def get_qte_damage_modifier(self) -> float:
+        """Get damage modifier from QTE result (1.0 = full damage, 0.0 = no damage)."""
+        qte = self.state.qte
+        if qte.result == "success":
+            return 1.0 - qte.damage_reduction
+        return 1.0
+
+    def clear_qte(self) -> None:
+        """Clear QTE state after processing."""
+        self.state.qte = QTEState()
 
     def dismiss(self) -> None:
         """Dismiss the battle scene."""

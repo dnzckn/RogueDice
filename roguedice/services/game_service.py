@@ -173,13 +173,14 @@ class GameService:
                     equipment.jewelry_slots[0] = item_id
                 self.equipment_system.recalculate_stats(self.player_id)
 
-    def take_turn(self, defer_square_processing: bool = False) -> TurnResult:
+    def take_turn(self, defer_square_processing: bool = False, nudge: int = 0) -> TurnResult:
         """
         Execute a complete turn.
 
         Args:
             defer_square_processing: If True, don't process landing square yet.
                                     Call process_landing_square() after animation.
+            nudge: Fate point nudge (+1 or -1) to apply to first die.
 
         Returns:
             TurnResult with all turn events
@@ -205,8 +206,8 @@ class GameService:
         player = self.world.get_component(self.player_id, PlayerComponent)
         player_stats = self.world.get_component(self.player_id, StatsComponent)
 
-        # Move player
-        move_result = self.movement_system.move_player(self.player_id)
+        # Move player (with optional nudge)
+        move_result = self.movement_system.move_player(self.player_id, nudge=nudge)
 
         result = TurnResult(move_result=move_result)
 
@@ -231,6 +232,61 @@ class GameService:
                 not player.boss_defeated and
                 not result.combat_result):
                 # The dragon has awakened - force the confrontation!
+                boss_square = self.board_factory.get_square_at(30)
+                if boss_square and boss_square.monster_entity_id:
+                    self._force_boss_fight(result, player, player_stats, boss_square)
+
+            # Check game over
+            if not player_stats.is_alive():
+                self.is_game_over = True
+                result.game_over = True
+                self._end_run()
+
+        return result
+
+    def take_turn_with_roll(self, rolls: list, total: int, defer_square_processing: bool = False) -> TurnResult:
+        """
+        Execute a turn with a predetermined roll (for Fate Roll ability).
+
+        Args:
+            rolls: List of die values to use
+            total: Total movement value
+            defer_square_processing: If True, don't process landing square yet.
+
+        Returns:
+            TurnResult with all turn events
+        """
+        if self.is_game_over or self.is_victory or not self.player_id:
+            return None
+
+        player = self.world.get_component(self.player_id, PlayerComponent)
+        player_stats = self.world.get_component(self.player_id, StatsComponent)
+
+        # Move player with predetermined roll
+        move_result = self.movement_system.move_player_with_roll(self.player_id, rolls, total)
+
+        result = TurnResult(move_result=move_result)
+
+        # Store for deferred processing
+        self._pending_square = move_result.square_component
+        self._pending_result = result
+        self._pending_laps = move_result.laps_completed
+
+        # Process lap completion
+        if move_result.laps_completed > 0 and not defer_square_processing:
+            self._process_lap_completion(result, player, player_stats)
+
+        # Process landing square (unless deferred)
+        if not defer_square_processing:
+            square = move_result.square_component
+            if square:
+                self._process_square(square, result, player, player_stats)
+
+            # Force boss fight
+            if (player.current_round >= self.BOSS_SPAWN_ROUND and
+                self.boss_active and
+                not player.boss_defeated and
+                not result.combat_result):
                 boss_square = self.board_factory.get_square_at(30)
                 if boss_square and boss_square.monster_entity_id:
                     self._force_boss_fight(result, player, player_stats, boss_square)

@@ -249,3 +249,78 @@ def check_chance(chance: float) -> bool:
         True if roll succeeds
     """
     return random.random() < chance
+
+
+# =============================================================================
+# FATE POINT DICE MANIPULATION
+# =============================================================================
+
+def nudge_roll(rolls: List[int], die_index: int, direction: int, sides: int = 6) -> List[int]:
+    """
+    Apply Nudge: +1 or -1 to a specific die.
+
+    Args:
+        rolls: List of die values
+        die_index: Which die to nudge (0-indexed)
+        direction: +1 or -1
+        sides: Number of sides on the die
+
+    Returns:
+        Modified rolls list
+    """
+    new_rolls = rolls.copy()
+    if 0 <= die_index < len(new_rolls):
+        new_value = new_rolls[die_index] + direction
+        # Clamp to valid range
+        new_value = max(1, min(sides, new_value))
+        new_rolls[die_index] = new_value
+    return new_rolls
+
+
+def apply_locked_die(rolls: List[int], locked_value: int) -> List[int]:
+    """
+    Replace one die with the locked value.
+
+    Args:
+        rolls: List of die values
+        locked_value: The locked die value to apply
+
+    Returns:
+        Modified rolls with first die replaced
+    """
+    new_rolls = rolls.copy()
+    if new_rolls:
+        new_rolls[0] = locked_value
+    return new_rolls
+
+
+def roll_for_character_with_fate(
+    character_id: str,
+    momentum: int = 0,
+    death_stacks: int = 0,
+    locked_die_value: Optional[int] = None,
+) -> Tuple[List[int], int, int, dict]:
+    """
+    Roll movement dice for a character, applying fate point modifiers.
+
+    Args:
+        character_id: Character template ID
+        momentum: Current momentum stacks
+        death_stacks: Kill stacks for necromancer
+        locked_die_value: If set, replace first die with this value
+
+    Returns:
+        Tuple of (individual_rolls, modifier, total, extra_info)
+    """
+    rolls, modifier, total, extra_info = roll_for_character(
+        character_id, momentum, death_stacks
+    )
+
+    # Apply locked die if present
+    if locked_die_value is not None and rolls:
+        original_first = rolls[0]
+        rolls[0] = locked_die_value
+        total = total - original_first + locked_die_value
+        extra_info["locked_die_used"] = True
+
+    return rolls, modifier, total, extra_info
